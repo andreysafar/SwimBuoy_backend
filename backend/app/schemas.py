@@ -22,6 +22,7 @@ class RouteIn(BaseModel):
     points: dict[str, PointIn]
     order: Optional[list[str]] = None
     start: Optional[PointIn] = None
+    finish: Optional[PointIn] = None
     is_public: bool = False
 
 

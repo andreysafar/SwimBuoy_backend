@@ -270,6 +270,12 @@ function renderRouteMap(elId, route) {
       .addTo(map).bindPopup(`${i + 1}. ${esc(p.name || pid)}`);
     pts.push([p.lat, p.lon]); line.push([p.lat, p.lon]);
   });
+  if (route.finish) {
+    L.circleMarker([route.finish.lat, route.finish.lon],
+      { radius: 7, color: "#34d399", fillColor: "#34d399", fillOpacity: .9 })
+      .addTo(map).bindPopup("Финиш");
+    pts.push([route.finish.lat, route.finish.lon]); line.push([route.finish.lat, route.finish.lon]);
+  }
   L.polyline(line, { color: "#2dd4bf", weight: 2, dashArray: "6 6" }).addTo(map);
   if (pts.length) map.fitBounds(pts, { padding: [40, 40] });
   return order;
@@ -295,7 +301,8 @@ async function viewPublicRoute(id) {
     app.innerHTML = `
       <h1>${esc(r.name)}</h1>
       <p class="subtitle">${order.length} точек · радиус ${r.arrivalRadiusM} м${r.athlete ? " · " + esc(r.athlete) : ""}</p>
-      <div class="btn-row"><a class="btn" href="/api/public/routes/${id}" download>JSON</a>
+      <div class="btn-row"><a class="btn" href="/api/public/routes/${id}.gpx">⬇ GPX (на часы / карты)</a>
+        <a class="btn secondary" href="/api/public/routes/${id}.json">⬇ JSON</a>
         <a class="btn ghost" href="#/">На главную</a></div>
       <div id="map" class="map"></div>
       <h2>Точки</h2><div id="tbl"></div>`;
@@ -389,6 +396,12 @@ async function viewGroup(token) {
         .addTo(map).bindPopup(`${i + 1}. ${esc(p.name || pid)}`);
       bounds.push([p.lat, p.lon]);
     });
+    if (route.finish) {
+      L.circleMarker([route.finish.lat, route.finish.lon],
+        { radius: 7, color: "#34d399", fillColor: "#34d399", fillOpacity: .9 })
+        .addTo(map).bindPopup("Финиш");
+      bounds.push([route.finish.lat, route.finish.lon]);
+    }
   }
 
   function drawCorridor(half) {
@@ -532,45 +545,117 @@ async function viewRoute(id) {
 
 async function viewRouteEdit(id) {
   let data = { name: "", arrivalRadiusM: 20, dwellSec: 4, orderMode: "fixed",
-    points: { P1: { lat: 60.0, lon: 30.0, name: "Старт" } }, order: ["P1"], start: null, is_public: false };
+    points: { P1: { lat: 60.0, lon: 30.0, name: "Буй 1" } }, order: ["P1"],
+    start: null, finish: null, is_public: false };
   if (id) {
     const r = await api(`/api/routes/${id}`);
     data = {
       name: r.name, arrivalRadiusM: r.arrivalRadiusM, dwellSec: r.dwellSec,
       orderMode: (r.session && r.session.orderMode) || "fixed",
       points: r.points, order: (r.session && r.session.order) || Object.keys(r.points),
-      start: r.start || null, is_public: !!r.is_public,
+      start: r.start || null, finish: r.finish || null, is_public: !!r.is_public,
     };
   }
+  let clickMode = "buoy"; // buoy | start | finish
+
   app.innerHTML = `
     <h1>${id ? "Изменить маршрут" : "Новый маршрут"}</h1>
-    <p class="subtitle">Координаты можно вставить вручную или кликом по карте (добавляет буй в конец).</p>
+    <p class="subtitle">Клик по карте добавляет точку выбранного типа. Коридор строится
+      от старта через буи к финишу.</p>
     <div class="row">
       <div><label>Название</label><input id="name" value="${esc(data.name)}" /></div>
       <div style="flex:0 0 120px"><label>Радиус, м</label><input id="rad" type="number" value="${data.arrivalRadiusM}" /></div>
       <div style="flex:0 0 120px"><label>Dwell, с</label><input id="dwell" type="number" value="${data.dwellSec}" /></div>
     </div>
     <label><input type="checkbox" id="pub" style="width:auto" ${data.is_public ? "checked" : ""}/> Публичный (виден другим и часам)</label>
-    <div id="map" class="map" style="margin-top:14px"></div>
+    <div class="row" style="align-items:end;margin-top:10px">
+      <div style="flex:0 0 auto"><label style="margin-top:0">Клик по карте добавляет</label>
+        <select id="clickmode" style="width:auto">
+          <option value="buoy">🟡 буй</option>
+          <option value="start">📍 старт</option>
+          <option value="finish">🟢 финиш</option>
+        </select></div>
+      <div style="flex:0 0 auto"><button class="btn ghost small" id="loop">финиш = старт</button></div>
+    </div>
+    <div id="map" class="map" style="margin-top:12px"></div>
+    <div class="legend"><span class="l-buoy">буй</span><span class="l-corridor">коридор</span></div>
+
+    <h2>Старт и финиш</h2>
+    <div id="ends"></div>
+
     <h2>Буи (по порядку)</h2>
     <div id="pts"></div>
     <div class="btn-row">
-      <button class="btn secondary small" id="add">＋ Добавить буй</button>
+      <button class="btn secondary small" id="add">＋ Добавить буй (центр карты)</button>
     </div>
+
+    <details style="margin-top:18px">
+      <summary class="muted" style="cursor:pointer">JSON-редактор (для продвинутых)</summary>
+      <p class="muted" style="font-size:13px;margin:8px 0">Отредактируйте JSON и нажмите
+        «Применить» — карта и поля обновятся. Затем «Сохранить».</p>
+      <textarea id="json" rows="14" spellcheck="false"
+        style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px"></textarea>
+      <div class="btn-row">
+        <button class="btn secondary small" id="applyjson">Применить JSON к карте</button>
+        <span id="jsonerr" class="muted" style="align-self:center;font-size:13px"></span>
+      </div>
+    </details>
+
     <div class="btn-row"><button class="btn" id="save">Сохранить</button>
       <a class="btn ghost" href="#/routes">Отмена</a></div>`;
 
+  const firstPid = data.order[0];
   const map = L.map("map").setView(
-    [data.points[data.order[0]]?.lat || 60, data.points[data.order[0]]?.lon || 30], 14);
+    [data.points[firstPid]?.lat || data.start?.lat || 60,
+     data.points[firstPid]?.lon || data.start?.lon || 30], 14);
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
     { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(map);
   let markers = [];
+
+  app.querySelector("#clickmode").onchange = (e) => { clickMode = e.target.value; };
 
   function nextId() {
     let n = 1;
     while (data.order.includes("P" + n)) n++;
     return "P" + n;
   }
+
+  // --- Старт / финиш ---
+  function endRow(kind, label, pt) {
+    if (!pt) {
+      return `<div class="card" style="margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <span class="muted">${label}: не задан</span>
+        <button class="btn ghost small" data-setend="${kind}">Задать (центр карты)</button></div>`;
+    }
+    return `<div class="card" style="margin-bottom:8px"><div class="row" style="align-items:end">
+      <div style="flex:0 0 90px"><label>${label}</label><input value="${kind}" disabled /></div>
+      <div style="flex:0 0 130px"><label>Lat</label><input data-end="${kind}" data-f="lat" value="${pt.lat}" /></div>
+      <div style="flex:0 0 130px"><label>Lon</label><input data-end="${kind}" data-f="lon" value="${pt.lon}" /></div>
+      <div style="flex:0 0 auto"><button class="btn danger small" data-delend="${kind}">убрать</button></div>
+    </div></div>`;
+  }
+  function renderEnds() {
+    const box = app.querySelector("#ends");
+    box.innerHTML = endRow("start", "📍 Старт", data.start) + endRow("finish", "🟢 Финиш", data.finish);
+    box.querySelectorAll("input[data-end]").forEach((inp) => {
+      inp.onchange = () => {
+        const kind = inp.dataset.end, f = inp.dataset.f;
+        if (data[kind]) { data[kind][f] = parseFloat(inp.value); renderMap(); syncJson(); }
+      };
+    });
+    box.querySelectorAll("button[data-setend]").forEach((b) => {
+      b.onclick = () => {
+        const c = map.getCenter();
+        data[b.dataset.setend] = { lat: +c.lat.toFixed(6), lon: +c.lng.toFixed(6),
+          name: b.dataset.setend === "start" ? "Старт" : "Финиш" };
+        renderEnds(); renderMap(); syncJson();
+      };
+    });
+    box.querySelectorAll("button[data-delend]").forEach((b) => {
+      b.onclick = () => { data[b.dataset.delend] = null; renderEnds(); renderMap(); syncJson(); };
+    });
+  }
+
   function renderPts() {
     const box = app.querySelector("#pts");
     box.innerHTML = data.order.map((pid, i) => {
@@ -587,7 +672,7 @@ async function viewRouteEdit(id) {
       inp.onchange = () => {
         const pid = inp.dataset.id, f = inp.dataset.f;
         data.points[pid][f] = f === "name" ? inp.value : parseFloat(inp.value);
-        renderMap();
+        renderMap(); syncJson();
       };
     });
     box.querySelectorAll("button[data-del]").forEach((b) => {
@@ -595,49 +680,124 @@ async function viewRouteEdit(id) {
         const pid = b.dataset.del;
         delete data.points[pid];
         data.order = data.order.filter((x) => x !== pid);
-        renderPts(); renderMap();
+        renderPts(); renderMap(); syncJson();
       };
     });
   }
+
   function renderMap() {
     markers.forEach((m) => map.removeLayer(m));
     markers = [];
     const line = [];
+    if (data.start) {
+      markers.push(L.marker([data.start.lat, data.start.lon]).addTo(map).bindTooltip("Старт"));
+      line.push([data.start.lat, data.start.lon]);
+    }
     data.order.forEach((pid, i) => {
       const p = data.points[pid];
       const m = L.circleMarker([p.lat, p.lon], { radius: 8, color: "#fbbf24", fillColor: "#fbbf24", fillOpacity: .9 })
         .addTo(map).bindTooltip(`${i + 1}`);
       markers.push(m); line.push([p.lat, p.lon]);
     });
+    if (data.finish) {
+      markers.push(L.circleMarker([data.finish.lat, data.finish.lon],
+        { radius: 7, color: "#34d399", fillColor: "#34d399", fillOpacity: .9 }).addTo(map).bindTooltip("Финиш"));
+      line.push([data.finish.lat, data.finish.lon]);
+    }
     markers.push(L.polyline(line, { color: "#2dd4bf", weight: 2, dashArray: "6 6" }).addTo(map));
   }
+
+  // --- Синхронизация JSON-редактора ---
+  function currentJson() {
+    return {
+      name: data.name, arrivalRadiusM: data.arrivalRadiusM, dwellSec: data.dwellSec,
+      orderMode: data.orderMode, points: data.points, order: data.order,
+      start: data.start, finish: data.finish, is_public: data.is_public,
+    };
+  }
+  function syncJson() {
+    const ta = app.querySelector("#json");
+    // не затираем, пока пользователь редактирует JSON вручную
+    if (document.activeElement !== ta) ta.value = JSON.stringify(currentJson(), null, 2);
+  }
+  app.querySelector("#applyjson").onclick = () => {
+    const err = app.querySelector("#jsonerr");
+    try {
+      const j = JSON.parse(app.querySelector("#json").value);
+      if (!j.points || typeof j.points !== "object") throw new Error("нет points");
+      data.name = j.name ?? data.name;
+      data.arrivalRadiusM = parseInt(j.arrivalRadiusM) || data.arrivalRadiusM;
+      data.dwellSec = parseInt(j.dwellSec) || data.dwellSec;
+      data.orderMode = j.orderMode || data.orderMode;
+      data.points = j.points;
+      data.order = (Array.isArray(j.order) && j.order.length ? j.order : Object.keys(j.points))
+        .filter((pid) => pid in j.points);
+      data.start = j.start || null;
+      data.finish = j.finish || null;
+      data.is_public = !!j.is_public;
+      app.querySelector("#name").value = data.name;
+      app.querySelector("#rad").value = data.arrivalRadiusM;
+      app.querySelector("#dwell").value = data.dwellSec;
+      app.querySelector("#pub").checked = data.is_public;
+      err.textContent = "✓ применено";
+      err.style.color = "var(--good)";
+      renderEnds(); renderPts(); renderMap();
+    } catch (e) {
+      err.textContent = "Ошибка JSON: " + e.message;
+      err.style.color = "var(--danger)";
+    }
+  };
+
   map.on("click", (e) => {
-    const pid = nextId();
-    data.points[pid] = { lat: +e.latlng.lat.toFixed(6), lon: +e.latlng.lng.toFixed(6), name: "" };
-    data.order.push(pid);
-    renderPts(); renderMap();
+    const lat = +e.latlng.lat.toFixed(6), lon = +e.latlng.lng.toFixed(6);
+    if (clickMode === "start") {
+      data.start = { lat, lon, name: "Старт" };
+    } else if (clickMode === "finish") {
+      data.finish = { lat, lon, name: "Финиш" };
+    } else {
+      const pid = nextId();
+      data.points[pid] = { lat, lon, name: "" };
+      data.order.push(pid);
+    }
+    renderEnds(); renderPts(); renderMap(); syncJson();
   });
   app.querySelector("#add").onclick = () => {
     const c = map.getCenter(); const pid = nextId();
     data.points[pid] = { lat: +c.lat.toFixed(6), lon: +c.lng.toFixed(6), name: "" };
-    data.order.push(pid); renderPts(); renderMap();
+    data.order.push(pid); renderPts(); renderMap(); syncJson();
   };
+  app.querySelector("#loop").onclick = () => {
+    if (!data.start) return toast("Сначала задайте старт");
+    data.finish = { lat: data.start.lat, lon: data.start.lon, name: "Финиш" };
+    renderEnds(); renderMap(); syncJson();
+  };
+
+  // Текущие значения name/rad/dwell держим в data для JSON-редактора.
+  app.querySelector("#name").oninput = (e) => { data.name = e.target.value; syncJson(); };
+  app.querySelector("#rad").oninput = (e) => { data.arrivalRadiusM = parseInt(e.target.value) || 20; syncJson(); };
+  app.querySelector("#dwell").oninput = (e) => { data.dwellSec = parseInt(e.target.value) || 4; syncJson(); };
+  app.querySelector("#pub").onchange = (e) => { data.is_public = e.target.checked; syncJson(); };
+
   app.querySelector("#save").onclick = async () => {
     const body = {
-      name: app.querySelector("#name").value.trim() || "Маршрут",
-      arrivalRadiusM: parseInt(app.querySelector("#rad").value) || 20,
-      dwellSec: parseInt(app.querySelector("#dwell").value) || 4,
+      name: (data.name || "").trim() || "Маршрут",
+      arrivalRadiusM: data.arrivalRadiusM,
+      dwellSec: data.dwellSec,
       orderMode: data.orderMode,
       points: data.points, order: data.order,
-      start: data.start, is_public: app.querySelector("#pub").checked,
+      start: data.start, finish: data.finish,
+      is_public: data.is_public,
     };
     if (!data.order.length) return toast("Добавьте хотя бы один буй");
-    const saved = id
-      ? await api(`/api/routes/${id}`, { method: "PUT", json: body })
-      : await api("/api/routes", { method: "POST", json: body });
-    location.hash = `#/routes/${saved.id}`;
+    try {
+      const saved = id
+        ? await api(`/api/routes/${id}`, { method: "PUT", json: body })
+        : await api("/api/routes", { method: "POST", json: body });
+      location.hash = `#/routes/${saved.id}`;
+    } catch (e) { toast(e.message); }
   };
-  renderPts(); renderMap();
+
+  renderEnds(); renderPts(); renderMap(); syncJson();
 }
 
 // ---------- Загрузка трека ----------
@@ -696,6 +856,9 @@ function renderReportMap(elId, geojson) {
         .addTo(map).bindPopup(`${esc(f.properties.name)}<br>ближе всего: ${f.properties.closest_m} м<br>${taken ? "взят" : "не взят"}`);
     } else if (k === "start") {
       L.marker(ll(g.coordinates)).addTo(map).bindPopup("Старт");
+    } else if (k === "finish") {
+      L.circleMarker(ll(g.coordinates), { radius: 7, color: "#34d399", fillColor: "#34d399", fillOpacity: .9 })
+        .addTo(map).bindPopup("Финиш");
     }
   });
   if (bounds.length) map.fitBounds(bounds, { padding: [40, 40] });

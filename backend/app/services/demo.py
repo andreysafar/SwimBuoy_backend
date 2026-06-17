@@ -60,6 +60,7 @@ def bootstrap_demo(db: Session) -> None:
         points=data.get("points", {}),
         order=session.get("order") or list(data.get("points", {}).keys()),
         start=data.get("start"),
+        finish=data.get("finish"),
         is_public=True,
     )
     db.add(route)

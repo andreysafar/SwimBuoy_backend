@@ -46,15 +46,23 @@ class Leg:
 
 
 def _build_legs(route: dict) -> list[Leg]:
+    """Плечи маршрута: старт → буи (по порядку) → финиш.
+
+    Старт и финиш необязательны; если заданы, коридор строится от старта до
+    финиша, а не только между первым и последним буем.
+    """
     points = route.get("points", {})
     order = (route.get("session") or {}).get("order") or list(points.keys())
     start = route.get("start")
+    finish = route.get("finish")
     seq: list[tuple[str, dict]] = []
     if start:
         seq.append(("start", {"lat": start["lat"], "lon": start["lon"], "name": start.get("name", "Старт")}))
     for pid in order:
         if pid in points:
             seq.append((pid, points[pid]))
+    if finish:
+        seq.append(("finish", {"lat": finish["lat"], "lon": finish["lon"], "name": finish.get("name", "Финиш")}))
     legs: list[Leg] = []
     for i in range(len(seq) - 1):
         (aid, a), (bid, b) = seq[i], seq[i + 1]
@@ -160,17 +168,20 @@ def build_report(route: dict, points: list[TrackPoint]) -> dict:
     # --- XTE по плечам ---
     legs_report = []
     all_xte: list[float] = []
-    # Соответствие плеч и индексов сближения.
-    # legs[0] = start->первый (или первый->второй, если старта нет).
+    # Индекс трека для каждого узла маршрута, выровненный с seq из _build_legs:
+    # [старт?] + буи + [финиш?]. Старт = первая точка трека, финиш = последняя.
     has_start = bool(route.get("start"))
+    has_finish = bool(route.get("finish"))
+    node_idx: list[int] = []
+    if has_start:
+        node_idx.append(0)
+    node_idx.extend(visit_idx)
+    if has_finish:
+        node_idx.append(len(points) - 1)
     for j, leg in enumerate(legs):
-        if has_start:
-            # leg j соединяет visit (j-1) и visit (j); leg 0 = start->buoy0
-            i_from = 0 if j == 0 else visit_idx[j - 1]
-            i_to = visit_idx[j]
-        else:
-            i_from = visit_idx[j]
-            i_to = visit_idx[j + 1]
+        # leg j соединяет node_idx[j] и node_idx[j+1].
+        i_from = node_idx[j]
+        i_to = node_idx[j + 1]
         samples = _collect_xte_on_leg(points, i_from, i_to, leg)
         all_xte.extend(samples)
         half = _leg_half_width(samples, leg.length_m)
@@ -267,6 +278,15 @@ def _build_geojson(
             "type": "Feature",
             "properties": {"kind": "start", "name": start.get("name", "Старт")},
             "geometry": {"type": "Point", "coordinates": [start["lon"], start["lat"]]},
+        })
+
+    # Финиш.
+    finish = route.get("finish")
+    if finish:
+        features.append({
+            "type": "Feature",
+            "properties": {"kind": "finish", "name": finish.get("name", "Финиш")},
+            "geometry": {"type": "Point", "coordinates": [finish["lon"], finish["lat"]]},
         })
 
     # Буи.

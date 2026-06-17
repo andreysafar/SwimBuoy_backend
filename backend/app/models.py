@@ -57,7 +57,8 @@ class Route(Base):
 
     points: Mapped[dict] = mapped_column(JSON, default=dict)   # {P1:{lat,lon,name},...}
     order: Mapped[list] = mapped_column(JSON, default=list)    # ["P1","P2",...]
-    start: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # {lat,lon,name}
+    start: Mapped[dict | None] = mapped_column(JSON, nullable=True)   # {lat,lon,name}
+    finish: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # {lat,lon,name}
 
     is_public: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
@@ -83,6 +84,8 @@ class Route(Base):
         }
         if self.start:
             data["start"] = self.start
+        if self.finish:
+            data["finish"] = self.finish
         return data
 
     def to_summary(self) -> dict:

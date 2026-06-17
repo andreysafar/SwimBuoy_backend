@@ -96,6 +96,8 @@ def _route_legs(route: Route) -> list[dict]:
     for pid in order:
         if pid in points:
             seq.append((pid, points[pid]))
+    if route.finish:
+        seq.append(("finish", route.finish))
     legs = []
     for i in range(len(seq) - 1):
         (aid, a), (bid, b) = seq[i], seq[i + 1]
@@ -127,6 +129,7 @@ def build_group_payload(db: Session, members: list[Activity]) -> dict:
             "points": points,
             "order": order,
             "start": route.start,
+            "finish": route.finish,
             "legs": _route_legs(route),
         }
 

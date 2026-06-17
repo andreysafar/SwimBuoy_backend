@@ -155,9 +155,10 @@ def build_route_gpx(route: dict) -> str:
 
     points = route.get("points", {})
     start = route.get("start")
+    finish = route.get("finish")
     order = (route.get("session") or {}).get("order") or list(points.keys())
 
-    # Waypoint'ы: старт (если есть) + буи.
+    # Waypoint'ы: старт (если есть) + буи + финиш (если есть).
     if start:
         wpt = ET.SubElement(
             gpx, "wpt", {"lat": f"{start['lat']:.6f}", "lon": f"{start['lon']:.6f}"}
@@ -175,6 +176,13 @@ def build_route_gpx(route: dict) -> str:
         ET.SubElement(wpt, "name").text = p.get("name", pid)
         ET.SubElement(wpt, "type").text = "Buoy"
 
+    if finish:
+        wpt = ET.SubElement(
+            gpx, "wpt", {"lat": f"{finish['lat']:.6f}", "lon": f"{finish['lon']:.6f}"}
+        )
+        ET.SubElement(wpt, "name").text = finish.get("name", "Finish")
+        ET.SubElement(wpt, "type").text = "Finish"
+
     # Маршрут (rte) для импорта как курс.
     rte = ET.SubElement(gpx, "rte")
     ET.SubElement(rte, "name").text = route.get("name", route.get("routeId", "route"))
@@ -184,6 +192,8 @@ def build_route_gpx(route: dict) -> str:
     for pid in order:
         if pid in points:
             seq.append((pid, points[pid]))
+    if finish:
+        seq.append(("finish", finish))
     for pid, p in seq:
         rtept = ET.SubElement(
             rte, "rtept", {"lat": f"{p['lat']:.6f}", "lon": f"{p['lon']:.6f}"}

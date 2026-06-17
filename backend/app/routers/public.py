@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -9,6 +10,7 @@ from ..db import get_db
 from ..models import Activity, RegistrationRequest, Route
 from ..schemas import RegistrationIn
 from ..services.groups import build_group_payload, group_public_activities
+from ..services.tracks import build_route_gpx
 
 router = APIRouter(prefix="/api/public", tags=["public"])
 
@@ -42,6 +44,32 @@ def public_routes(db: Session = Depends(get_db)) -> list[dict]:
     for r in rows:
         out.append({**r.to_summary(), "athlete": r.athlete.name if r.athlete else None})
     return out
+
+
+@router.get("/routes/{route_id}.json")
+def public_route_json(route_id: str, db: Session = Depends(get_db)) -> JSONResponse:
+    """buoy_route.json публичного маршрута для скачивания."""
+    route = db.get(Route, route_id)
+    if not route or not route.is_public:
+        raise HTTPException(status_code=404, detail="Маршрут недоступен")
+    return JSONResponse(
+        route.to_buoy_route(),
+        headers={"Content-Disposition": f'attachment; filename="{route_id}.json"'},
+    )
+
+
+@router.get("/routes/{route_id}.gpx")
+def public_route_gpx(route_id: str, db: Session = Depends(get_db)) -> Response:
+    """GPX публичного маршрута (буи + старт/финиш + rte) для часов/карт."""
+    route = db.get(Route, route_id)
+    if not route or not route.is_public:
+        raise HTTPException(status_code=404, detail="Маршрут недоступен")
+    gpx = build_route_gpx(route.to_buoy_route())
+    return Response(
+        content=gpx,
+        media_type="application/gpx+xml",
+        headers={"Content-Disposition": f'attachment; filename="{route_id}.gpx"'},
+    )
 
 
 @router.get("/routes/{route_id}")

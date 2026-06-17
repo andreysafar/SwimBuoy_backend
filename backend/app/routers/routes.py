@@ -24,6 +24,7 @@ def _apply(route: Route, body: RouteIn) -> None:
     route.points = {pid: p.model_dump() for pid, p in body.points.items()}
     route.order = body.order or list(body.points.keys())
     route.start = body.start.model_dump() if body.start else None
+    route.finish = body.finish.model_dump() if body.finish else None
     route.is_public = body.is_public
 
 
