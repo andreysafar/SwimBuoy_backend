@@ -111,7 +111,7 @@ def share_og(token: str, db: Session = Depends(get_db)) -> HTMLResponse:
     base = settings.base_url.rstrip("/")
     desc = _he("Заплыв · " + " · ".join(parts) if parts else "Заплыв на открытой воде")
     return HTMLResponse(_og_page(title, desc, _he(f"{base}/s/{token}"),
-                                 _he(f"{base}/assets/og-cover.svg"), redirect))
+                                 _he(f"{base}/assets/og-cover.png"), redirect))
 
 
 @app.get("/g/{token}", response_class=HTMLResponse, include_in_schema=False)
@@ -148,7 +148,7 @@ def group_og(token: str, db: Session = Depends(get_db)) -> HTMLResponse:
     base = settings.base_url.rstrip("/")
     desc = _he("Совместная тренировка · " + " · ".join(parts))
     return HTMLResponse(_og_page(title, desc, _he(f"{base}/g/{token}"),
-                                 _he(f"{base}/assets/og-cover.svg"), redirect))
+                                 _he(f"{base}/assets/og-cover.png"), redirect))
 
 
 # --- Статический фронтенд (SPA) ---
