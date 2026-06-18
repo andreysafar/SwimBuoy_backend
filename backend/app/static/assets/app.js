@@ -105,7 +105,7 @@ async function route() {
   if (parts[0] === "login") return viewLogin();
 
   // Админка — отдельная авторизация (Basic).
-  if (parts[0] === "admin") return viewAdmin(parts[1]);
+  if (parts[0] === "admin") return viewAdmin(parts[1], parts[2], parts[3]);
 
   if (!getToken()) return viewLanding();
 
@@ -543,12 +543,16 @@ async function viewRoute(id) {
   };
 }
 
-async function viewRouteEdit(id) {
+async function viewRouteEdit(id, opts = {}) {
+  const adminMode = !!opts.admin;
+  const apiFn = adminMode ? adminApi : api;
+  const basePath = adminMode ? "/api/admin/routes" : "/api/routes";
+  const backHash = adminMode ? "#/admin/routes" : "#/routes";
   let data = { name: "", arrivalRadiusM: 20, dwellSec: 4, orderMode: "fixed",
     points: { P1: { lat: 60.0, lon: 30.0, name: "Буй 1" } }, order: ["P1"],
     start: null, finish: null, is_public: false };
   if (id) {
-    const r = await api(`/api/routes/${id}`);
+    const r = await apiFn(`${basePath}/${id}`);
     data = {
       name: r.name, arrivalRadiusM: r.arrivalRadiusM, dwellSec: r.dwellSec,
       orderMode: (r.session && r.session.orderMode) || "fixed",
@@ -602,7 +606,7 @@ async function viewRouteEdit(id) {
     </details>
 
     <div class="btn-row"><button class="btn" id="save">Сохранить</button>
-      <a class="btn ghost" href="#/routes">Отмена</a></div>`;
+      <a class="btn ghost" href="${backHash}">Отмена</a></div>`;
 
   const firstPid = data.order[0];
   const map = L.map("map").setView(
@@ -791,9 +795,10 @@ async function viewRouteEdit(id) {
     if (!data.order.length) return toast("Добавьте хотя бы один буй");
     try {
       const saved = id
-        ? await api(`/api/routes/${id}`, { method: "PUT", json: body })
-        : await api("/api/routes", { method: "POST", json: body });
-      location.hash = `#/routes/${saved.id}`;
+        ? await apiFn(`${basePath}/${id}`, { method: "PUT", json: body })
+        : await apiFn(basePath, { method: "POST", json: body });
+      toast("Маршрут сохранён");
+      location.hash = adminMode ? "#/admin/routes" : `#/routes/${saved.id}`;
     } catch (e) { toast(e.message); }
   };
 
@@ -958,10 +963,14 @@ function adminLoginView() {
   app.querySelector("#p").onkeydown = (e) => { if (e.key === "Enter") submit(); };
 }
 
-async function viewAdmin(tab) {
+async function viewAdmin(tab, sub, sub2) {
   if (!getAdmin()) return adminLoginView();
   try { await adminApi("/api/admin/login"); }
   catch (e) { return adminLoginView(); }
+
+  // Редактирование маршрута прямо из админки (полноэкранный редактор).
+  if (tab === "routes" && sub === "new") return viewRouteEdit(null, { admin: true });
+  if (tab === "routes" && sub && sub2 === "edit") return viewRouteEdit(sub, { admin: true });
 
   tab = tab || "registrations";
   const tabLink = (id, label) =>
@@ -1062,13 +1071,17 @@ async function adminRoutes() {
   const box = app.querySelector("#atab");
   box.className = "";
   const list = await adminApi("/api/admin/routes");
-  if (!list.length) { box.innerHTML = `<div class="empty">Маршрутов нет.</div>`; return; }
-  box.innerHTML = `<table><thead><tr><th>Название</th><th>Спортсмен</th><th>Буи</th><th>Публичный</th><th></th></tr></thead>
+  const head = `<div class="btn-row"><a class="btn small" href="#/admin/routes/new">＋ Новый маршрут</a></div>`;
+  if (!list.length) { box.innerHTML = head + `<div class="empty">Маршрутов нет.</div>`; return; }
+  box.innerHTML = head + `<div class="table-wrap"><table><thead><tr><th>Название</th><th>Спортсмен</th><th>Буи</th><th>Публичный</th><th></th></tr></thead>
     <tbody>${list.map((r) => `<tr>
       <td>${esc(r.name)}</td><td class="muted">${esc(r.athlete || "")}</td>
       <td>${r.points_count}</td><td>${r.is_public ? "да" : "нет"}</td>
-      <td><button class="btn danger small" data-del="${r.id}">Удалить</button></td>
-    </tr>`).join("")}</tbody></table>`;
+      <td style="white-space:nowrap">
+        <a class="btn ghost small" href="#/admin/routes/${r.id}/edit">✎ Изменить</a>
+        ${r.is_public ? `<a class="btn ghost small" href="/api/public/routes/${r.id}.gpx">GPX</a>` : ""}
+        <button class="btn danger small" data-del="${r.id}">Удалить</button></td>
+    </tr>`).join("")}</tbody></table></div>`;
   box.querySelectorAll("button[data-del]").forEach((b) => {
     b.onclick = async () => {
       if (!confirm("Удалить маршрут?")) return;

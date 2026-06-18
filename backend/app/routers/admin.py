@@ -7,11 +7,21 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..models import Activity, Athlete, RegistrationRequest, Route
+from ..schemas import RouteIn
 from ..security import require_admin
 from ..services.athletes import create_athlete
+from .routes import _apply as _apply_route_body
 
 router = APIRouter(prefix="/api/admin", tags=["admin"],
                    dependencies=[Depends(require_admin)])
+
+
+def _system_owner(db: Session) -> Athlete:
+    """Системный владелец маршрутов, создаваемых из админки."""
+    owner = db.scalar(select(Athlete).where(Athlete.name == "SwimBuoy"))
+    if owner is None:
+        owner = create_athlete(db, "SwimBuoy")
+    return owner
 
 
 @router.get("/login")
@@ -31,6 +41,41 @@ def all_routes(db: Session = Depends(get_db)) -> list[dict]:
             "athlete": r.athlete.name if r.athlete else None,
         })
     return out
+
+
+@router.post("/routes")
+def create_route(body: RouteIn, db: Session = Depends(get_db)) -> dict:
+    """Создать маршрут от имени системного владельца (SwimBuoy)."""
+    route = Route(athlete_id=_system_owner(db).id)
+    _apply_route_body(route, body)
+    db.add(route)
+    db.commit()
+    db.refresh(route)
+    return route.to_summary()
+
+
+@router.get("/routes/{route_id}")
+def get_route(route_id: str, db: Session = Depends(get_db)) -> dict:
+    """Маршрут в формате buoy_route.json для редактирования в админке."""
+    route = db.get(Route, route_id)
+    if not route:
+        raise HTTPException(status_code=404, detail="Маршрут не найден")
+    data = route.to_buoy_route()
+    data["is_public"] = route.is_public
+    data["owner"] = True  # админ может редактировать любой маршрут
+    data["athlete"] = route.athlete.name if route.athlete else None
+    return data
+
+
+@router.put("/routes/{route_id}")
+def update_route(route_id: str, body: RouteIn, db: Session = Depends(get_db)) -> dict:
+    route = db.get(Route, route_id)
+    if not route:
+        raise HTTPException(status_code=404, detail="Маршрут не найден")
+    _apply_route_body(route, body)
+    db.commit()
+    db.refresh(route)
+    return route.to_summary()
 
 
 @router.delete("/routes/{route_id}")
