@@ -10,6 +10,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
 
 from .db import Base
+from .services.geo import route_chord_distance_m
 
 # Токен спортсмена: ровно 8 символов A-Z a-z 0-9 (вводится на часах как пароль).
 TOKEN_LENGTH = 8
@@ -89,10 +90,12 @@ class Route(Base):
         return data
 
     def to_summary(self) -> dict:
+        dist = round(route_chord_distance_m(self.to_buoy_route()), 1)
         return {
             "id": self.id,
             "name": self.name,
             "points_count": len(self.points or {}),
+            "distance_m": dist,
             "arrivalRadiusM": self.arrival_radius_m,
             "is_public": self.is_public,
             "created_at": self.created_at.isoformat(),

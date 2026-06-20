@@ -83,6 +83,20 @@ function fmtDate(iso) {
   if (!iso) return "—";
   return new Date(iso).toLocaleString("ru-RU", { dateStyle: "medium", timeStyle: "short" });
 }
+function routeListMeta(r) {
+  const parts = [`${r.points_count} буёв`];
+  if (r.distance_m > 0) parts.push(fmtDist(r.distance_m));
+  parts.push(`радиус ${r.arrivalRadiusM} м`);
+  return parts.join(" · ");
+}
+function routeToLegData(route) {
+  return {
+    start: route.start || null,
+    finish: route.finish || null,
+    order: (route.session && route.session.order) || Object.keys(route.points || {}),
+    points: route.points || {},
+  };
+}
 
 // ---------- Роутер ----------
 function navView() {
@@ -221,7 +235,7 @@ async function viewLanding() {
     re.innerHTML = routes.length ? routes.map((r) => `
       <a class="card clickable" style="display:block" href="#/r/${r.id}">
         <strong>${esc(r.name)}</strong>
-        <div class="muted" style="font-size:13px;margin-top:8px">${r.points_count} буёв · радиус ${r.arrivalRadiusM} м</div>
+        <div class="muted" style="font-size:13px;margin-top:8px">${routeListMeta(r)}</div>
         <div class="muted" style="font-size:12px;margin-top:6px">${esc(r.athlete || "")}</div>
       </a>`).join("") : `<div class="empty">Маршрутов пока нет.</div>`;
   } catch (e) {}
@@ -262,30 +276,41 @@ function viewRegister() {
 
 // ---------- Карта маршрута (общая) ----------
 function renderRouteMap(elId, route) {
-  const order = (route.session && route.session.order) || Object.keys(route.points);
+  const order = (route.session && route.session.order) || Object.keys(route.points || {});
+  const legs = buildRouteLegs(routeToLegData(route));
   const map = L.map(elId);
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
     { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(map);
-  const pts = [], line = [];
+  const pts = [];
   if (route.start) {
     L.marker([route.start.lat, route.start.lon]).addTo(map).bindPopup("Старт");
-    pts.push([route.start.lat, route.start.lon]); line.push([route.start.lat, route.start.lon]);
+    pts.push([route.start.lat, route.start.lon]);
   }
   order.forEach((pid, i) => {
     const p = route.points[pid]; if (!p) return;
     L.circleMarker([p.lat, p.lon], { radius: 8, color: "#fbbf24", fillColor: "#fbbf24", fillOpacity: .9 })
       .addTo(map).bindPopup(`${i + 1}. ${esc(p.name || pid)}`);
-    pts.push([p.lat, p.lon]); line.push([p.lat, p.lon]);
+    pts.push([p.lat, p.lon]);
   });
   if (route.finish) {
     L.circleMarker([route.finish.lat, route.finish.lon],
       { radius: 7, color: "#34d399", fillColor: "#34d399", fillOpacity: .9 })
       .addTo(map).bindPopup("Финиш");
-    pts.push([route.finish.lat, route.finish.lon]); line.push([route.finish.lat, route.finish.lon]);
+    pts.push([route.finish.lat, route.finish.lon]);
   }
-  L.polyline(line, { color: "#2dd4bf", weight: 2, dashArray: "6 6" }).addTo(map);
+  legs.forEach((leg) => {
+    L.polygon(_legPolygon(leg.a, leg.b, leg.corridor_half_m), {
+      color: "#2dd4bf", weight: 1, opacity: .5,
+      fillColor: "#2dd4bf", fillOpacity: .22,
+    }).addTo(map);
+    L.polyline([leg.a, leg.b], { color: "#2dd4bf", weight: 3, opacity: .85 })
+      .addTo(map).bindTooltip(`${esc(leg.fromLabel)} → ${esc(leg.toLabel)}: ${fmtDist(leg.length_m)}`);
+  });
+  if (!legs.length && pts.length >= 2) {
+    L.polyline(pts, { color: "#2dd4bf", weight: 2, dashArray: "6 6" }).addTo(map);
+  }
   if (pts.length) map.fitBounds(pts, { padding: [40, 40] });
-  return order;
+  return { order, legs };
 }
 
 function routePointsTable(route, order) {
@@ -305,15 +330,20 @@ async function viewPublicRoute(id) {
       return res.json();
     });
     const order = (r.session && r.session.order) || Object.keys(r.points);
+    const legs = buildRouteLegs(routeToLegData(r));
+    const dist = r.distance_m || legs.reduce((s, l) => s + l.length_m, 0);
     app.innerHTML = `
       <h1>${esc(r.name)}</h1>
-      <p class="subtitle">${order.length} точек · радиус ${r.arrivalRadiusM} м${r.athlete ? " · " + esc(r.athlete) : ""}</p>
+      <p class="subtitle">${order.length} буёв · ${fmtDist(dist)} · радиус ${r.arrivalRadiusM} м${r.athlete ? " · " + esc(r.athlete) : ""}</p>
       <div class="btn-row"><a class="btn" href="/api/public/routes/${id}.gpx">⬇ GPX (на часы / карты)</a>
         <a class="btn secondary" href="/api/public/routes/${id}.json">⬇ JSON</a>
         <a class="btn ghost" href="#/">На главную</a></div>
       <div id="map" class="map"></div>
+      <div class="legend"><span class="l-buoy">буй</span><span class="l-corridor">коридор</span></div>
+      <div id="rstats"></div>
       <h2>Точки</h2><div id="tbl"></div>`;
     renderRouteMap("map", r);
+    renderRouteLegStats(app.querySelector("#rstats"), legs);
     app.querySelector("#tbl").innerHTML = routePointsTable(r, order);
   } catch (e) {
     app.innerHTML = `<div class="card center-panel"><h2>Маршрут недоступен</h2>
@@ -573,7 +603,7 @@ async function viewRoutes() {
         <strong>${esc(r.name)}</strong>
         ${r.is_public ? '<span class="pill info">public</span>' : ""}
       </div>
-      <div class="muted" style="font-size:13px;margin-top:8px">${r.points_count} буёв · радиус ${r.arrivalMRadius ?? r.arrivalRadiusM} м</div>
+      <div class="muted" style="font-size:13px;margin-top:8px">${routeListMeta(r)}</div>
       <div class="muted" style="font-size:12px;margin-top:6px">обновлён ${fmtDate(r.updated_at)}</div>
     </div>`).join("");
 }
@@ -581,9 +611,11 @@ async function viewRoutes() {
 async function viewRoute(id) {
   const r = await api(`/api/routes/${id}`);
   const order = (r.session && r.session.order) || Object.keys(r.points);
+  const legs = buildRouteLegs(routeToLegData(r));
+  const dist = r.distance_m || legs.reduce((s, l) => s + l.length_m, 0);
   app.innerHTML = `
     <h1>${esc(r.name)}</h1>
-    <p class="subtitle">${order.length} точек · радиус ${r.arrivalRadiusM} м · dwell ${r.dwellSec} с</p>
+    <p class="subtitle">${order.length} буёв · ${fmtDist(dist)} · радиус ${r.arrivalRadiusM} м · dwell ${r.dwellSec} с</p>
     <div class="btn-row">
       <a class="btn" href="/api/routes/${id}.gpx">⬇ GPX (на часы / карты)</a>
       <a class="btn secondary" href="/api/routes/${id}.json">⬇ JSON</a>
@@ -591,10 +623,12 @@ async function viewRoute(id) {
       <button class="btn danger" id="del">Удалить</button>` : ""}
     </div>
     <div id="map" class="map"></div>
-    <div class="legend"><span class="l-buoy">буй</span></div>
+    <div class="legend"><span class="l-buoy">буй</span><span class="l-corridor">коридор</span></div>
+    <div id="rstats"></div>
     <h2>Точки</h2><div id="tbl"></div>`;
 
   renderRouteMap("map", r);
+  renderRouteLegStats(app.querySelector("#rstats"), legs);
   app.querySelector("#tbl").innerHTML = routePointsTable(r, order);
 
   const del = app.querySelector("#del");
@@ -1192,10 +1226,10 @@ async function adminRoutes() {
   const list = await adminApi("/api/admin/routes");
   const head = `<div class="btn-row"><a class="btn small" href="#/admin/routes/new">＋ Новый маршрут</a></div>`;
   if (!list.length) { box.innerHTML = head + `<div class="empty">Маршрутов нет.</div>`; return; }
-  box.innerHTML = head + `<div class="table-wrap"><table><thead><tr><th>Название</th><th>Спортсмен</th><th>Буи</th><th>Публичный</th><th></th></tr></thead>
+  box.innerHTML = head + `<div class="table-wrap"><table><thead><tr><th>Название</th><th>Спортсмен</th><th>Буи</th><th>Дистанция</th><th>Публичный</th><th></th></tr></thead>
     <tbody>${list.map((r) => `<tr>
       <td>${esc(r.name)}</td><td class="muted">${esc(r.athlete || "")}</td>
-      <td>${r.points_count}</td><td>${r.is_public ? "да" : "нет"}</td>
+      <td>${r.points_count}</td><td>${fmtDist(r.distance_m)}</td><td>${r.is_public ? "да" : "нет"}</td>
       <td style="white-space:nowrap">
         <a class="btn ghost small" href="#/admin/routes/${r.id}/edit">✎ Изменить</a>
         ${r.is_public ? `<a class="btn ghost small" href="/api/public/routes/${r.id}.gpx">GPX</a>` : ""}

@@ -92,6 +92,28 @@ def interpolate_leg(
     return pts
 
 
+def route_chord_distance_m(route: dict) -> float:
+    """Сумма длин хорд по плечам маршрута (старт → буи → финиш)."""
+    points = route.get("points") or {}
+    order = (route.get("session") or {}).get("order") or list(points.keys())
+    start = route.get("start")
+    finish = route.get("finish")
+    seq: list[tuple[float, float]] = []
+    if start:
+        seq.append((start["lat"], start["lon"]))
+    for pid in order:
+        if pid in points:
+            p = points[pid]
+            seq.append((p["lat"], p["lon"]))
+    if finish:
+        seq.append((finish["lat"], finish["lon"]))
+    total = 0.0
+    for i in range(len(seq) - 1):
+        a, b = seq[i], seq[i + 1]
+        total += haversine(a[0], a[1], b[0], b[1])
+    return total
+
+
 def offset_polyline(
     center: list[tuple[float, float]], half_width_m: float, side: int
 ) -> list[tuple[float, float]]:
