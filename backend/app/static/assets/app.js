@@ -67,6 +67,13 @@ function fmtDist(m) {
   if (m == null) return "—";
   return m >= 1000 ? (m / 1000).toFixed(2) + " км" : Math.round(m) + " м";
 }
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const p1 = lat1 * Math.PI / 180, p2 = lat2 * Math.PI / 180;
+  const dphi = (lat2 - lat1) * Math.PI / 180, dlmb = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dphi / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dlmb / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
 function fmtDur(s) {
   if (s == null) return "—";
   const m = Math.floor(s / 60), sec = Math.round(s % 60);
@@ -339,6 +346,61 @@ function _legPolygon(a, b, half) {
   ];
 }
 
+function legHalfWidthDefault(legLenM) {
+  return Math.round(Math.max(20, Math.min(95, legLenM * 0.11 + 5)));
+}
+
+function buildRouteLegs(data) {
+  const seq = [];
+  if (data.start) {
+    seq.push({ id: "start", label: data.start.name || "Старт", pt: data.start });
+  }
+  (data.order || []).forEach((pid) => {
+    const p = data.points && data.points[pid];
+    if (p) seq.push({ id: pid, label: p.name || pid, pt: p });
+  });
+  if (data.finish) {
+    seq.push({ id: "finish", label: data.finish.name || "Финиш", pt: data.finish });
+  }
+  const legs = [];
+  for (let i = 0; i < seq.length - 1; i++) {
+    const a = seq[i], b = seq[i + 1];
+    const aPt = [a.pt.lat, a.pt.lon], bPt = [b.pt.lat, b.pt.lon];
+    const length_m = haversine(aPt[0], aPt[1], bPt[0], bPt[1]);
+    legs.push({
+      id: `${a.id}->${b.id}`,
+      from: a.id, to: b.id,
+      fromLabel: a.label, toLabel: b.label,
+      a: aPt, b: bPt,
+      length_m,
+      corridor_half_m: legHalfWidthDefault(length_m),
+    });
+  }
+  return legs;
+}
+
+function renderRouteLegStats(el, legs) {
+  if (!el) return;
+  if (!legs.length) {
+    el.innerHTML = `<p class="muted">Задайте старт, буи и финиш — появятся плечи, коридор и дистанции.</p>`;
+    return;
+  }
+  const total = legs.reduce((s, l) => s + l.length_m, 0);
+  el.innerHTML = `
+    <div class="stats">
+      <div class="stat"><div class="v">${fmtDist(total)}</div><div class="k">итого по хордам</div></div>
+      <div class="stat"><div class="v">${legs.length}</div><div class="k">плеч</div></div>
+    </div>
+    <div class="table-wrap" style="margin-top:12px">
+      <table><thead><tr><th>Плечо</th><th>Дистанция</th><th>Коридор</th></tr></thead>
+      <tbody>${legs.map((l) => `<tr>
+        <td>${esc(l.fromLabel)} → ${esc(l.toLabel)}</td>
+        <td>${fmtDist(l.length_m)}</td>
+        <td class="muted">±${l.corridor_half_m} м</td>
+      </tr>`).join("")}</tbody></table>
+    </div>`;
+}
+
 async function viewGroup(token) {
   let d;
   try {
@@ -584,6 +646,20 @@ async function viewRouteEdit(id, opts = {}) {
     <div id="map" class="map" style="margin-top:12px"></div>
     <div class="legend"><span class="l-buoy">буй</span><span class="l-corridor">коридор</span></div>
 
+    <div class="card" style="margin-top:14px">
+      <div class="row" style="align-items:center;margin-bottom:8px">
+        <div style="flex:1 1 260px">
+          <label style="margin-top:0">Ширина коридора: <b id="halfval">авто</b></label>
+          <input id="half" type="range" min="0" max="120" step="1" value="0" />
+          <p class="muted" style="font-size:12px;margin:4px 0 0">0 = авто по длине плеча (как в отчёте)</p>
+        </div>
+        <div style="flex:0 0 auto"><label style="margin-top:0">
+          <input type="checkbox" id="corrToggle" checked style="width:auto" /> показывать коридор</label>
+        </div>
+      </div>
+      <div id="rstats"></div>
+    </div>
+
     <h2>Старт и финиш</h2>
     <div id="ends"></div>
 
@@ -615,6 +691,29 @@ async function viewRouteEdit(id, opts = {}) {
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
     { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(map);
   let markers = [];
+  const corridorLayer = L.layerGroup().addTo(map);
+  let corridorHalfOverride = 0;
+  let showCorridor = true;
+
+  function corridorHalfForLeg(leg) {
+    return corridorHalfOverride > 0 ? corridorHalfOverride : leg.corridor_half_m;
+  }
+
+  function updateHalfLabel() {
+    const el = app.querySelector("#halfval");
+    if (!el) return;
+    el.textContent = corridorHalfOverride > 0 ? `±${corridorHalfOverride} м` : "авто";
+  }
+
+  app.querySelector("#half").oninput = (e) => {
+    corridorHalfOverride = parseInt(e.target.value, 10) || 0;
+    updateHalfLabel();
+    renderMap();
+  };
+  app.querySelector("#corrToggle").onchange = (e) => {
+    showCorridor = e.target.checked;
+    renderMap();
+  };
 
   app.querySelector("#clickmode").onchange = (e) => { clickMode = e.target.value; };
 
@@ -692,6 +791,8 @@ async function viewRouteEdit(id, opts = {}) {
   function renderMap() {
     markers.forEach((m) => map.removeLayer(m));
     markers = [];
+    corridorLayer.clearLayers();
+    const legs = buildRouteLegs(data);
     const line = [];
     if (data.start) {
       markers.push(L.marker([data.start.lat, data.start.lon]).addTo(map).bindTooltip("Старт"));
@@ -708,7 +809,25 @@ async function viewRouteEdit(id, opts = {}) {
         { radius: 7, color: "#34d399", fillColor: "#34d399", fillOpacity: .9 }).addTo(map).bindTooltip("Финиш"));
       line.push([data.finish.lat, data.finish.lon]);
     }
-    markers.push(L.polyline(line, { color: "#2dd4bf", weight: 2, dashArray: "6 6" }).addTo(map));
+    if (showCorridor) {
+      legs.forEach((leg) => {
+        const half = corridorHalfForLeg(leg);
+        L.polygon(_legPolygon(leg.a, leg.b, half), {
+          color: "#2dd4bf", weight: 1, opacity: .5,
+          fillColor: "#2dd4bf", fillOpacity: .22,
+        }).addTo(corridorLayer);
+      });
+    }
+    legs.forEach((leg) => {
+      markers.push(L.polyline([leg.a, leg.b], {
+        color: "#2dd4bf", weight: 3, opacity: .85,
+      }).addTo(map).bindTooltip(`${esc(leg.fromLabel)} → ${esc(leg.toLabel)}: ${fmtDist(leg.length_m)}`));
+    });
+    if (line.length >= 2 && !legs.length) {
+      markers.push(L.polyline(line, { color: "#2dd4bf", weight: 2, dashArray: "6 6" }).addTo(map));
+    }
+    renderRouteLegStats(app.querySelector("#rstats"), legs);
+    updateHalfLabel();
   }
 
   // --- Синхронизация JSON-редактора ---
