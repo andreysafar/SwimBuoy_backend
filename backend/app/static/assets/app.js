@@ -1007,15 +1007,21 @@ async function viewRouteEdit(id, opts = {}) {
     }
   }
 
-  app.querySelector("#overlaySearch")?.addEventListener("input", (e) => {
-    renderOverlayGroups(e.target.value);
-  });
-  app.querySelector("#overlayClear")?.onclick = () => {
-    trackLayer.clearLayers();
-    selectedOverlays.clear();
-    renderOverlayChips();
-    renderOverlayGroups(app.querySelector("#overlaySearch")?.value || "");
-  };
+  const overlaySearch = app.querySelector("#overlaySearch");
+  if (overlaySearch) {
+    overlaySearch.addEventListener("input", (e) => {
+      renderOverlayGroups(e.target.value);
+    });
+  }
+  const overlayClear = app.querySelector("#overlayClear");
+  if (overlayClear) {
+    overlayClear.onclick = () => {
+      trackLayer.clearLayers();
+      selectedOverlays.clear();
+      renderOverlayChips();
+      renderOverlayGroups(overlaySearch ? overlaySearch.value : "");
+    };
+  }
 
   // --- Синхронизация JSON-редактора ---
   function currentJson() {
