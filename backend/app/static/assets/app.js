@@ -472,6 +472,87 @@ function mountOverlayGroup(title, items, container, selected, onToggle, filter) 
   });
 }
 
+const SPB_CENTER = [59.9386, 30.3141];
+
+function mapPinIcon(kind, label) {
+  const cls = kind === "start" ? "pin-start" : kind === "finish" ? "pin-finish" : "pin-buoy";
+  const text = label != null && label !== "" ? String(label) : "";
+  return L.divIcon({
+    className: `map-pin ${cls}`,
+    html: `<div class="map-pin-dot">${text}</div>`,
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+  });
+}
+
+function cloneRouteGeometry(data) {
+  return JSON.parse(JSON.stringify({
+    points: data.points,
+    order: [...data.order],
+    start: data.start,
+    finish: data.finish,
+  }));
+}
+
+function applyRouteGeometry(data, snap) {
+  data.points = snap.points;
+  data.order = [...snap.order];
+  data.start = snap.start;
+  data.finish = snap.finish;
+}
+
+function collectEditorBounds(data, overlayLines) {
+  const pts = [];
+  if (data.start) pts.push([data.start.lat, data.start.lon]);
+  data.order.forEach((pid) => {
+    const p = data.points[pid];
+    if (p) pts.push([p.lat, p.lon]);
+  });
+  if (data.finish) pts.push([data.finish.lat, data.finish.lon]);
+  (overlayLines || []).forEach((line) => {
+    line.forEach((ll) => pts.push(ll));
+  });
+  return pts;
+}
+
+function mergeOverlayTrackLines(selectedOverlays) {
+  const merged = [];
+  for (const entry of selectedOverlays.values()) {
+    if (entry.line && entry.line.length) merged.push(...entry.line);
+  }
+  return merged;
+}
+
+function snapBuoysAlongTrack(data, track) {
+  if (!track.length || !data.order.length) return false;
+  let startIdx = 0;
+  for (const pid of data.order) {
+    const p = data.points[pid];
+    if (!p) continue;
+    let bestI = startIdx;
+    let bestD = Infinity;
+    for (let i = startIdx; i < track.length; i++) {
+      const d = haversine(p.lat, p.lon, track[i][0], track[i][1]);
+      if (d < bestD) {
+        bestD = d;
+        bestI = i;
+      }
+    }
+    p.lat = +track[bestI][0].toFixed(6);
+    p.lon = +track[bestI][1].toFixed(6);
+    startIdx = Math.min(bestI + 1, track.length - 1);
+  }
+  return true;
+}
+
+async function fetchGeoHint() {
+  try {
+    const g = await fetch("/api/geo/hint").then((r) => r.json());
+    if (g.lat != null && g.lon != null) return [g.lat, g.lon];
+  } catch (e) { /* fallback */ }
+  return SPB_CENTER;
+}
+
 async function viewGroup(token) {
   let d;
   try {
@@ -686,7 +767,7 @@ async function viewRouteEdit(id, opts = {}) {
   const basePath = adminMode ? "/api/admin/routes" : "/api/routes";
   const backHash = adminMode ? "#/admin/routes" : "#/routes";
   let data = { name: "", arrivalRadiusM: 20, dwellSec: 4, orderMode: "fixed",
-    points: { P1: { lat: 60.0, lon: 30.0, name: "Буй 1" } }, order: ["P1"],
+    points: {}, order: [],
     start: null, finish: null, is_public: false };
   if (id) {
     const r = await apiFn(`${basePath}/${id}`);
@@ -701,8 +782,7 @@ async function viewRouteEdit(id, opts = {}) {
 
   app.innerHTML = `
     <h1>${id ? "Изменить маршрут" : "Новый маршрут"}</h1>
-    <p class="subtitle">Клик по карте добавляет точку выбранного типа. Коридор строится
-      от старта через буи к финишу.</p>
+    <p class="subtitle">Клик по карте добавляет точку. Буи, старт и финиш можно перетаскивать мышью.</p>
     <div class="row">
       <div><label>Название</label><input id="name" value="${esc(data.name)}" /></div>
       <div style="flex:0 0 120px"><label>Радиус, м</label><input id="rad" type="number" value="${data.arrivalRadiusM}" /></div>
@@ -724,6 +804,8 @@ async function viewRouteEdit(id, opts = {}) {
       <div class="overlay-body">
         <div class="overlay-toolbar">
           <input type="search" id="overlaySearch" placeholder="Поиск по названию, спортсмену…" autocomplete="off" />
+          <button type="button" class="btn secondary small" id="autoSnap">Авто-подтяжка к треку</button>
+          <button type="button" class="btn ghost small" id="autoSnapUndo" disabled>↩ Назад</button>
           <button type="button" class="btn ghost small" id="overlayClear">Снять все</button>
         </div>
         <div id="overlayGroups" class="overlay-groups"><div class="overlay-empty">Загрузка…</div></div>
@@ -754,9 +836,7 @@ async function viewRouteEdit(id, opts = {}) {
 
     <h2>Буи (по порядку)</h2>
     <div id="pts"></div>
-    <div class="btn-row">
-      <button class="btn secondary small" id="add">＋ Добавить буй (центр карты)</button>
-    </div>
+    <p class="muted" style="font-size:13px;margin-top:8px">Новый буй — выберите «буй» в меню выше и кликните на карте.</p>
 
     <details style="margin-top:18px">
       <summary class="muted" style="cursor:pointer">JSON-редактор (для продвинутых)</summary>
@@ -773,19 +853,17 @@ async function viewRouteEdit(id, opts = {}) {
     <div class="btn-row"><button class="btn" id="save">Сохранить</button>
       <a class="btn ghost" href="${backHash}">Отмена</a></div>`;
 
-  const firstPid = data.order[0];
-  const map = L.map("map").setView(
-    [data.points[firstPid]?.lat || data.start?.lat || 60,
-     data.points[firstPid]?.lon || data.start?.lon || 30], 14);
+  const map = L.map("map").setView(SPB_CENTER, 11);
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
     { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(map);
-  let markers = [];
+  const featureLayer = L.layerGroup().addTo(map);
   const trackLayer = L.layerGroup().addTo(map);
   const corridorLayer = L.layerGroup().addTo(map);
   let corridorHalfOverride = 0;
   let showCorridor = true;
   let overlayCandidates = { on_route: [], unassigned: [], limit: 150 };
   const selectedOverlays = new Map();
+  let snapUndo = null;
   const trackLinePath = adminMode ? "/api/admin/activities" : "/api/activities";
   const overlayListPath = adminMode ? "/api/admin/routes/editor-overlays" : "/api/routes/editor-overlays";
 
@@ -820,9 +898,8 @@ async function viewRouteEdit(id, opts = {}) {
   // --- Старт / финиш ---
   function endRow(kind, label, pt) {
     if (!pt) {
-      return `<div class="card" style="margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:8px">
-        <span class="muted">${label}: не задан</span>
-        <button class="btn ghost small" data-setend="${kind}">Задать (центр карты)</button></div>`;
+      return `<div class="card" style="margin-bottom:8px">
+        <span class="muted">${label}: не задан — выберите в меню «клик по карте» и ткните на карту</span></div>`;
     }
     return `<div class="card" style="margin-bottom:8px"><div class="row" style="align-items:end">
       <div style="flex:0 0 90px"><label>${label}</label><input value="${kind}" disabled /></div>
@@ -838,14 +915,6 @@ async function viewRouteEdit(id, opts = {}) {
       inp.onchange = () => {
         const kind = inp.dataset.end, f = inp.dataset.f;
         if (data[kind]) { data[kind][f] = parseFloat(inp.value); renderMap(); syncJson(); }
-      };
-    });
-    box.querySelectorAll("button[data-setend]").forEach((b) => {
-      b.onclick = () => {
-        const c = map.getCenter();
-        data[b.dataset.setend] = { lat: +c.lat.toFixed(6), lon: +c.lng.toFixed(6),
-          name: b.dataset.setend === "start" ? "Старт" : "Финиш" };
-        renderEnds(); renderMap(); syncJson();
       };
     });
     box.querySelectorAll("button[data-delend]").forEach((b) => {
@@ -889,27 +958,28 @@ async function viewRouteEdit(id, opts = {}) {
     });
   }
 
-  function renderMap() {
-    markers.forEach((m) => map.removeLayer(m));
-    markers = [];
+  function fitMapToContent() {
+    const bounds = collectEditorBounds(data, mergeOverlayTrackLines(selectedOverlays));
+    if (bounds.length >= 2) {
+      map.fitBounds(bounds, { padding: [48, 48], maxZoom: 16 });
+    } else if (bounds.length === 1) {
+      map.setView(bounds[0], 15);
+    }
+  }
+
+  function bindDrag(marker, onMove) {
+    marker.on("dragend", () => {
+      const ll = marker.getLatLng();
+      onMove(+ll.lat.toFixed(6), +ll.lng.toFixed(6));
+      renderPts();
+      syncJson();
+      updateCorridors();
+    });
+  }
+
+  function updateCorridors() {
     corridorLayer.clearLayers();
     const legs = buildRouteLegs(data);
-    const line = [];
-    if (data.start) {
-      markers.push(L.marker([data.start.lat, data.start.lon]).addTo(map).bindTooltip("Старт"));
-      line.push([data.start.lat, data.start.lon]);
-    }
-    data.order.forEach((pid, i) => {
-      const p = data.points[pid];
-      const m = L.circleMarker([p.lat, p.lon], { radius: 8, color: "#fbbf24", fillColor: "#fbbf24", fillOpacity: .9 })
-        .addTo(map).bindTooltip(`${i + 1}`);
-      markers.push(m); line.push([p.lat, p.lon]);
-    });
-    if (data.finish) {
-      markers.push(L.circleMarker([data.finish.lat, data.finish.lon],
-        { radius: 7, color: "#34d399", fillColor: "#34d399", fillOpacity: .9 }).addTo(map).bindTooltip("Финиш"));
-      line.push([data.finish.lat, data.finish.lon]);
-    }
     if (showCorridor) {
       legs.forEach((leg) => {
         const half = corridorHalfForLeg(leg);
@@ -920,15 +990,51 @@ async function viewRouteEdit(id, opts = {}) {
       });
     }
     legs.forEach((leg) => {
-      markers.push(L.polyline([leg.a, leg.b], {
+      L.polyline([leg.a, leg.b], {
         color: "#2dd4bf", weight: 3, opacity: .85,
-      }).addTo(map).bindTooltip(`${esc(leg.fromLabel)} → ${esc(leg.toLabel)}: ${fmtDist(leg.length_m)}`));
+      }).addTo(corridorLayer).bindTooltip(
+        `${esc(leg.fromLabel)} → ${esc(leg.toLabel)}: ${fmtDist(leg.length_m)}`
+      );
     });
-    if (line.length >= 2 && !legs.length) {
-      markers.push(L.polyline(line, { color: "#2dd4bf", weight: 2, dashArray: "6 6" }).addTo(map));
-    }
     renderRouteLegStats(app.querySelector("#rstats"), legs);
     updateHalfLabel();
+  }
+
+  function renderMap(fit = false) {
+    featureLayer.clearLayers();
+    if (data.start) {
+      const m = L.marker([data.start.lat, data.start.lon], {
+        draggable: true, icon: mapPinIcon("start", "S"),
+      }).addTo(featureLayer).bindTooltip("Старт");
+      bindDrag(m, (lat, lon) => {
+        data.start.lat = lat;
+        data.start.lon = lon;
+        renderEnds();
+      });
+    }
+    data.order.forEach((pid, i) => {
+      const p = data.points[pid];
+      if (!p) return;
+      const m = L.marker([p.lat, p.lon], {
+        draggable: true, icon: mapPinIcon("buoy", i + 1),
+      }).addTo(featureLayer).bindTooltip(`${i + 1}. ${p.name || pid}`);
+      bindDrag(m, (lat, lon) => {
+        data.points[pid].lat = lat;
+        data.points[pid].lon = lon;
+      });
+    });
+    if (data.finish) {
+      const m = L.marker([data.finish.lat, data.finish.lon], {
+        draggable: true, icon: mapPinIcon("finish", "F"),
+      }).addTo(featureLayer).bindTooltip("Финиш");
+      bindDrag(m, (lat, lon) => {
+        data.finish.lat = lat;
+        data.finish.lon = lon;
+        renderEnds();
+      });
+    }
+    updateCorridors();
+    if (fit) fitMapToContent();
   }
 
   function renderOverlayChips() {
@@ -962,7 +1068,7 @@ async function viewRouteEdit(id, opts = {}) {
     if (hint) {
       hint.textContent = total >= lim
         ? `Показаны последние ${lim} тренировок в каждой группе. Уточните поиск, если нужной нет.`
-        : "Отметьте тренировки — их треки появятся на карте под коридором.";
+        : "Отметьте тренировки — треки появятся на карте. «Авто-подтяжка» сдвигает буи вдоль трека (есть «Назад»).";
     }
   }
 
@@ -974,6 +1080,7 @@ async function viewRouteEdit(id, opts = {}) {
         selectedOverlays.delete(activityId);
       }
       renderOverlayChips();
+      fitMapToContent();
       return;
     }
     if (selectedOverlays.has(activityId)) return;
@@ -988,8 +1095,9 @@ async function viewRouteEdit(id, opts = {}) {
       const layer = L.polyline(line.line, { color, weight: 3, opacity: .78 })
         .bindTooltip(esc(line.name));
       trackLayer.addLayer(layer);
-      selectedOverlays.set(activityId, { layer, color, name: line.name });
+      selectedOverlays.set(activityId, { layer, color, name: line.name, line: line.line });
       renderOverlayChips();
+      fitMapToContent();
     } catch (e) {
       toast(e.message);
       renderOverlayGroups(app.querySelector("#overlaySearch")?.value || "");
@@ -1020,6 +1128,40 @@ async function viewRouteEdit(id, opts = {}) {
       selectedOverlays.clear();
       renderOverlayChips();
       renderOverlayGroups(overlaySearch ? overlaySearch.value : "");
+      fitMapToContent();
+    };
+  }
+  const autoSnapBtn = app.querySelector("#autoSnap");
+  const autoSnapUndoBtn = app.querySelector("#autoSnapUndo");
+  function setSnapUndoEnabled(on) {
+    if (autoSnapUndoBtn) autoSnapUndoBtn.disabled = !on;
+  }
+  if (autoSnapBtn) {
+    autoSnapBtn.onclick = () => {
+      const track = mergeOverlayTrackLines(selectedOverlays);
+      if (!track.length) return toast("Сначала включите подложку с треком");
+      if (!data.order.length) return toast("Нет буёв для подтяжки");
+      snapUndo = cloneRouteGeometry(data);
+      snapBuoysAlongTrack(data, track);
+      renderPts();
+      renderEnds();
+      renderMap(true);
+      syncJson();
+      setSnapUndoEnabled(true);
+      toast("Буи подтянуты к треку");
+    };
+  }
+  if (autoSnapUndoBtn) {
+    autoSnapUndoBtn.onclick = () => {
+      if (!snapUndo) return;
+      applyRouteGeometry(data, snapUndo);
+      snapUndo = null;
+      setSnapUndoEnabled(false);
+      renderPts();
+      renderEnds();
+      renderMap(true);
+      syncJson();
+      toast("Подтяжка отменена");
     };
   }
 
@@ -1077,11 +1219,6 @@ async function viewRouteEdit(id, opts = {}) {
     }
     renderEnds(); renderPts(); renderMap(); syncJson();
   });
-  app.querySelector("#add").onclick = () => {
-    const c = map.getCenter(); const pid = nextId();
-    data.points[pid] = { lat: +c.lat.toFixed(6), lon: +c.lng.toFixed(6), name: "" };
-    data.order.push(pid); renderPts(); renderMap(); syncJson();
-  };
   app.querySelector("#loop").onclick = () => {
     if (!data.start) return toast("Сначала задайте старт");
     data.finish = { lat: data.start.lat, lon: data.start.lon, name: "Финиш" };
@@ -1114,7 +1251,15 @@ async function viewRouteEdit(id, opts = {}) {
     } catch (e) { toast(e.message); }
   };
 
-  renderEnds(); renderPts(); renderMap(); syncJson();
+  renderEnds(); renderPts(); syncJson();
+  if (id) {
+    renderMap(true);
+  } else {
+    fetchGeoHint().then((center) => {
+      map.setView(center, 11);
+      renderMap(false);
+    });
+  }
   loadOverlayCandidates();
 }
 

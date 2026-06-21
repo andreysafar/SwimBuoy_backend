@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from urllib.error import URLError
+from urllib.request import urlopen
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -49,6 +51,36 @@ def _startup() -> None:
 @app.get("/api/health")
 def health() -> dict:
     return {"status": "ok", "base_url": settings.base_url}
+
+
+# Saint Petersburg — default map center for new routes when geo lookup fails.
+_DEFAULT_LAT, _DEFAULT_LON = 59.9386, 30.3141
+
+
+@app.get("/api/geo/hint")
+def geo_hint(request: Request) -> dict:
+    """Approximate map center from client IP (fallback: Saint Petersburg)."""
+    lat, lon = _DEFAULT_LAT, _DEFAULT_LON
+    forwarded = request.headers.get("x-forwarded-for", "")
+    ip = (forwarded.split(",")[0].strip() if forwarded else None) or (
+        request.client.host if request.client else ""
+    )
+    if ip and ip not in ("127.0.0.1", "::1", "localhost"):
+        try:
+            with urlopen(
+                f"http://ip-api.com/json/{ip}?fields=status,lat,lon",
+                timeout=2,
+            ) as resp:
+                data = json.loads(resp.read().decode())
+            if data.get("status") == "success":
+                lat, lon = float(data["lat"]), float(data["lon"])
+        except (URLError, OSError, ValueError, KeyError, TypeError):
+            pass
+    return {
+        "lat": lat,
+        "lon": lon,
+        "default": lat == _DEFAULT_LAT and lon == _DEFAULT_LON,
+    }
 
 
 app.include_router(athletes.router)
