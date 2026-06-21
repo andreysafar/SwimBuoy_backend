@@ -431,6 +431,47 @@ function renderRouteLegStats(el, legs) {
     </div>`;
 }
 
+function overlayItemMeta(a) {
+  const bits = [];
+  if (a.athlete) bits.push(a.athlete);
+  if (a.recorded_at) bits.push(fmtDate(a.recorded_at));
+  if (a.distance_m) bits.push(fmtDist(a.distance_m));
+  return bits.join(" · ");
+}
+
+function mountOverlayGroup(title, items, container, selected, onToggle, filter) {
+  const q = (filter || "").trim().toLowerCase();
+  const filtered = items.filter((a) => {
+    if (!q) return true;
+    return [a.name, a.athlete, a.source, a.id].join(" ").toLowerCase().includes(q);
+  });
+  const group = document.createElement("div");
+  group.className = "overlay-group";
+  const countLabel = filtered.length === items.length
+    ? String(items.length)
+    : `${filtered.length} / ${items.length}`;
+  group.innerHTML = `<h3>${esc(title)} (${countLabel})</h3>`;
+  const list = document.createElement("div");
+  list.className = "overlay-list";
+  if (!filtered.length) {
+    list.innerHTML = `<div class="overlay-empty">${items.length ? "Ничего не найдено" : "Пусто"}</div>`;
+  } else {
+    list.innerHTML = filtered.map((a) => `
+      <label class="overlay-item">
+        <input type="checkbox" data-oid="${a.id}" ${selected.has(a.id) ? "checked" : ""} />
+        <div class="meta">
+          <div class="title">${esc(a.name)}</div>
+          <div class="sub">${esc(overlayItemMeta(a))}</div>
+        </div>
+      </label>`).join("");
+  }
+  group.appendChild(list);
+  container.appendChild(group);
+  list.querySelectorAll("input[data-oid]").forEach((cb) => {
+    cb.onchange = () => onToggle(cb.dataset.oid, cb.checked);
+  });
+}
+
 async function viewGroup(token) {
   let d;
   try {
@@ -677,8 +718,22 @@ async function viewRouteEdit(id, opts = {}) {
         </select></div>
       <div style="flex:0 0 auto"><button class="btn ghost small" id="loop">финиш = старт</button></div>
     </div>
+
+    <details class="overlay-panel" id="overlayPanel">
+      <summary>Подложка: треки тренировок</summary>
+      <div class="overlay-body">
+        <div class="overlay-toolbar">
+          <input type="search" id="overlaySearch" placeholder="Поиск по названию, спортсмену…" autocomplete="off" />
+          <button type="button" class="btn ghost small" id="overlayClear">Снять все</button>
+        </div>
+        <div id="overlayGroups" class="overlay-groups"><div class="overlay-empty">Загрузка…</div></div>
+        <div id="overlayChips" class="overlay-chips"></div>
+        <p class="overlay-hint muted" id="overlayHint"></p>
+      </div>
+    </details>
+
     <div id="map" class="map" style="margin-top:12px"></div>
-    <div class="legend"><span class="l-buoy">буй</span><span class="l-corridor">коридор</span></div>
+    <div class="legend"><span class="l-buoy">буй</span><span class="l-corridor">коридор</span><span class="l-track" id="trackLegend" style="display:none">трек</span></div>
 
     <div class="card" style="margin-top:14px">
       <div class="row" style="align-items:center;margin-bottom:8px">
@@ -725,9 +780,14 @@ async function viewRouteEdit(id, opts = {}) {
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
     { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(map);
   let markers = [];
+  const trackLayer = L.layerGroup().addTo(map);
   const corridorLayer = L.layerGroup().addTo(map);
   let corridorHalfOverride = 0;
   let showCorridor = true;
+  let overlayCandidates = { on_route: [], unassigned: [], limit: 150 };
+  const selectedOverlays = new Map();
+  const trackLinePath = adminMode ? "/api/admin/activities" : "/api/activities";
+  const overlayListPath = adminMode ? "/api/admin/routes/editor-overlays" : "/api/routes/editor-overlays";
 
   function corridorHalfForLeg(leg) {
     return corridorHalfOverride > 0 ? corridorHalfOverride : leg.corridor_half_m;
@@ -795,16 +855,23 @@ async function viewRouteEdit(id, opts = {}) {
 
   function renderPts() {
     const box = app.querySelector("#pts");
-    box.innerHTML = data.order.map((pid, i) => {
-      const p = data.points[pid];
-      return `<div class="card" style="margin-bottom:8px"><div class="row" style="align-items:end">
-        <div style="flex:0 0 60px"><label>ID</label><input value="${esc(pid)}" disabled /></div>
-        <div><label>Имя</label><input data-f="name" data-id="${pid}" value="${esc(p.name || "")}" /></div>
-        <div style="flex:0 0 130px"><label>Lat</label><input data-f="lat" data-id="${pid}" value="${p.lat}" /></div>
-        <div style="flex:0 0 130px"><label>Lon</label><input data-f="lon" data-id="${pid}" value="${p.lon}" /></div>
-        <div style="flex:0 0 auto"><button class="btn danger small" data-del="${pid}">✕</button></div>
-      </div></div>`;
-    }).join("");
+    if (!data.order.length) {
+      box.innerHTML = `<p class="muted">Буёв нет — кликните по карте или добавьте вручную.</p>`;
+      return;
+    }
+    box.innerHTML = `<div class="table-wrap buoy-table-wrap"><table>
+      <thead><tr><th>#</th><th>ID</th><th>Имя</th><th>Lat</th><th>Lon</th><th></th></tr></thead>
+      <tbody>${data.order.map((pid, i) => {
+        const p = data.points[pid];
+        return `<tr>
+          <td>${i + 1}</td>
+          <td class="muted">${esc(pid)}</td>
+          <td><input data-f="name" data-id="${pid}" value="${esc(p.name || "")}" /></td>
+          <td><input data-f="lat" data-id="${pid}" value="${p.lat}" /></td>
+          <td><input data-f="lon" data-id="${pid}" value="${p.lon}" /></td>
+          <td><button class="btn danger small" data-del="${pid}">✕</button></td>
+        </tr>`;
+      }).join("")}</tbody></table></div>`;
     box.querySelectorAll("input[data-f]").forEach((inp) => {
       inp.onchange = () => {
         const pid = inp.dataset.id, f = inp.dataset.f;
@@ -863,6 +930,92 @@ async function viewRouteEdit(id, opts = {}) {
     renderRouteLegStats(app.querySelector("#rstats"), legs);
     updateHalfLabel();
   }
+
+  function renderOverlayChips() {
+    const chips = app.querySelector("#overlayChips");
+    const legend = app.querySelector("#trackLegend");
+    if (!chips) return;
+    if (!selectedOverlays.size) {
+      chips.innerHTML = "";
+      if (legend) legend.style.display = "none";
+      return;
+    }
+    if (legend) legend.style.display = "";
+    chips.innerHTML = [...selectedOverlays.values()].map((o) =>
+      `<span class="overlay-chip" style="border-color:${o.color};color:${o.color}">${esc(o.name)}</span>`
+    ).join("");
+  }
+
+  function renderOverlayGroups(filter = "") {
+    const box = app.querySelector("#overlayGroups");
+    const hint = app.querySelector("#overlayHint");
+    if (!box) return;
+    box.innerHTML = "";
+    if (id) {
+      mountOverlayGroup("На этом маршруте", overlayCandidates.on_route, box,
+        selectedOverlays, toggleOverlay, filter);
+    }
+    mountOverlayGroup("Без маршрута", overlayCandidates.unassigned, box,
+      selectedOverlays, toggleOverlay, filter);
+    const total = overlayCandidates.on_route.length + overlayCandidates.unassigned.length;
+    const lim = overlayCandidates.limit || 150;
+    if (hint) {
+      hint.textContent = total >= lim
+        ? `Показаны последние ${lim} тренировок в каждой группе. Уточните поиск, если нужной нет.`
+        : "Отметьте тренировки — их треки появятся на карте под коридором.";
+    }
+  }
+
+  async function toggleOverlay(activityId, on) {
+    if (!on) {
+      const entry = selectedOverlays.get(activityId);
+      if (entry) {
+        trackLayer.removeLayer(entry.layer);
+        selectedOverlays.delete(activityId);
+      }
+      renderOverlayChips();
+      return;
+    }
+    if (selectedOverlays.has(activityId)) return;
+    try {
+      const line = await apiFn(`${trackLinePath}/${activityId}/track-line`);
+      if (!line.line || line.line.length < 2) {
+        toast("В тренировке нет трека");
+        renderOverlayGroups(app.querySelector("#overlaySearch")?.value || "");
+        return;
+      }
+      const color = SWIMMER_COLORS[selectedOverlays.size % SWIMMER_COLORS.length];
+      const layer = L.polyline(line.line, { color, weight: 3, opacity: .78 })
+        .bindTooltip(esc(line.name));
+      trackLayer.addLayer(layer);
+      selectedOverlays.set(activityId, { layer, color, name: line.name });
+      renderOverlayChips();
+    } catch (e) {
+      toast(e.message);
+      renderOverlayGroups(app.querySelector("#overlaySearch")?.value || "");
+    }
+  }
+
+  async function loadOverlayCandidates() {
+    try {
+      const url = id ? `${overlayListPath}?route_id=${encodeURIComponent(id)}` : overlayListPath;
+      overlayCandidates = await apiFn(url);
+      renderOverlayGroups();
+    } catch (e) {
+      const box = app.querySelector("#overlayGroups");
+      if (box) box.innerHTML = `<div class="overlay-empty">${esc(e.message)}</div>`;
+    }
+  }
+
+  app.querySelector("#overlaySearch")?.addEventListener("input", (e) => {
+    renderOverlayGroups(e.target.value);
+  });
+  app.querySelector("#overlayClear")?.onclick = () => {
+    trackLayer.clearLayers();
+    selectedOverlays.clear();
+    renderOverlayChips();
+    renderOverlayGroups(app.querySelector("#overlaySearch")?.value || "");
+  };
 
   // --- Синхронизация JSON-редактора ---
   function currentJson() {
@@ -956,6 +1109,7 @@ async function viewRouteEdit(id, opts = {}) {
   };
 
   renderEnds(); renderPts(); renderMap(); syncJson();
+  loadOverlayCandidates();
 }
 
 // ---------- Загрузка трека ----------

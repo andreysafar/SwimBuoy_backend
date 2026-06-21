@@ -204,3 +204,20 @@ def build_route_gpx(route: dict) -> str:
     ET.indent(tree, space="  ")
     return ('<?xml version="1.0" encoding="UTF-8"?>\n'
             + ET.tostring(gpx, encoding="unicode"))
+
+
+def sample_track_line(track: list, max_pts: int = 400) -> list[list[float]]:
+    """Downsample track dicts to [[lat, lon], ...] for map overlay."""
+    coords = [
+        [float(p["lat"]), float(p["lon"])]
+        for p in track
+        if isinstance(p, dict) and "lat" in p and "lon" in p
+    ]
+    if len(coords) <= max_pts:
+        return coords
+    out: list[list[float]] = []
+    step = (len(coords) - 1) / (max_pts - 1)
+    for i in range(max_pts):
+        idx = int(round(i * step))
+        out.append(coords[idx])
+    return out

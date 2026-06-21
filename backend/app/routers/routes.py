@@ -11,6 +11,7 @@ from ..models import Athlete, Route
 from ..schemas import RouteIn
 from ..security import get_current_athlete
 from ..services.tracks import build_route_gpx
+from ..services.overlays import athlete_overlay_candidates
 
 router = APIRouter(prefix="/api/routes", tags=["routes"])
 
@@ -64,6 +65,18 @@ def list_routes(include_public: bool = True,
         cond = or_(cond, Route.is_public.is_(True))
     rows = db.scalars(select(Route).where(cond).order_by(Route.updated_at.desc())).all()
     return [r.to_summary() for r in rows]
+
+
+@router.get("/editor-overlays")
+def route_editor_overlays(
+    route_id: str | None = None,
+    athlete: Athlete = Depends(get_current_athlete),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Кандидаты подложки для редактора: тренировки на маршруте и без маршрута."""
+    if route_id:
+        _get_readable(route_id, db, athlete)
+    return athlete_overlay_candidates(db, athlete, route_id)
 
 
 @router.get("/{route_id}.json")

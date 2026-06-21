@@ -10,6 +10,8 @@ from ..models import Activity, Athlete, RegistrationRequest, Route
 from ..schemas import RouteIn
 from ..security import require_admin
 from ..services.athletes import create_athlete
+from ..services.overlays import admin_overlay_candidates
+from ..services.tracks import sample_track_line
 from .routes import _apply as _apply_route_body
 
 router = APIRouter(prefix="/api/admin", tags=["admin"],
@@ -41,6 +43,15 @@ def all_routes(db: Session = Depends(get_db)) -> list[dict]:
             "athlete": r.athlete.name if r.athlete else None,
         })
     return out
+
+
+@router.get("/routes/editor-overlays")
+def route_editor_overlays(route_id: str | None = None,
+                          db: Session = Depends(get_db)) -> dict:
+    """Кандидаты подложки для админ-редактора маршрута."""
+    if route_id and not db.get(Route, route_id):
+        raise HTTPException(status_code=404, detail="Маршрут не найден")
+    return admin_overlay_candidates(db, route_id)
 
 
 @router.post("/routes")
@@ -99,6 +110,18 @@ def all_activities(db: Session = Depends(get_db)) -> list[dict]:
             "athlete": a.athlete.name if a.athlete else None,
         })
     return out
+
+
+@router.get("/activities/{activity_id}/track-line")
+def activity_track_line(activity_id: str, db: Session = Depends(get_db)) -> dict:
+    activity = db.get(Activity, activity_id)
+    if not activity or not activity.track:
+        raise HTTPException(status_code=404, detail="Тренировка не найдена")
+    return {
+        "id": activity.id,
+        "name": activity.name,
+        "line": sample_track_line(activity.track),
+    }
 
 
 @router.delete("/activities/{activity_id}")

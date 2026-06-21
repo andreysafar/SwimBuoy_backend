@@ -138,6 +138,55 @@ th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: upp
 .legend .l-buoy::before { background: #fbbf24; border-radius: 50%; }
 .legend .l-miss::before { background: #f87171; border-radius: 50%; }
 
+/* Подложка треков в редакторе маршрута */
+.overlay-panel { margin: 14px 0; }
+.overlay-panel > summary {
+  cursor: pointer; font-weight: 600; font-size: 14px;
+  padding: 10px 12px; background: var(--panel-solid);
+  border: 1px solid var(--border); border-radius: 10px;
+  list-style: none;
+}
+.overlay-panel > summary::-webkit-details-marker { display: none; }
+.overlay-panel[open] > summary { border-radius: 10px 10px 0 0; border-bottom: none; }
+.overlay-body {
+  border: 1px solid var(--border); border-top: none;
+  border-radius: 0 0 10px 10px; padding: 12px; background: var(--panel-solid);
+}
+.overlay-toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+.overlay-toolbar input[type="search"] { flex: 1 1 180px; margin: 0; }
+.overlay-groups { display: flex; flex-direction: column; gap: 12px; }
+.overlay-group h3 {
+  margin: 0 0 6px; font-size: 12px; font-weight: 600;
+  color: var(--muted); text-transform: uppercase; letter-spacing: .04em;
+}
+.overlay-list {
+  max-height: 200px; overflow-y: auto;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: #0d1626;
+}
+.overlay-item {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 8px 10px; border-bottom: 1px solid var(--border);
+  font-size: 13px; cursor: pointer;
+}
+.overlay-item:last-child { border-bottom: none; }
+.overlay-item:hover { background: rgba(45, 212, 191, .06); }
+.overlay-item input { width: auto; margin-top: 2px; flex-shrink: 0; }
+.overlay-item .meta { flex: 1; min-width: 0; }
+.overlay-item .title { font-weight: 600; word-break: break-word; }
+.overlay-item .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.overlay-empty { padding: 16px; text-align: center; color: var(--muted); font-size: 13px; }
+.overlay-hint { font-size: 12px; margin: 10px 0 0; }
+.overlay-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.overlay-chip {
+  font-size: 12px; padding: 3px 8px; border-radius: 999px;
+  border: 1px solid var(--border); background: #0d1626;
+}
+.buoy-table-wrap { max-height: 320px; overflow-y: auto; margin-top: 8px; }
+.buoy-table-wrap table { min-width: 520px; margin: 0; }
+.buoy-table-wrap td input { padding: 6px 8px; font-size: 13px; }
+.buoy-table-wrap .btn.small { padding: 4px 8px; }
+
 /* ---- Адаптив ---- */
 @media (max-width: 600px) {
   main { padding: 16px 10px 60px; }

@@ -14,7 +14,7 @@ from ..schemas import ShareToggle
 from ..security import get_current_athlete
 from ..services.activities import create_activity
 from ..services.report import build_report
-from ..services.tracks import dicts_to_points, parse_track
+from ..services.tracks import dicts_to_points, parse_track, sample_track_line
 
 router = APIRouter(prefix="/api/activities", tags=["activities"])
 
@@ -80,6 +80,20 @@ def list_activities(athlete: Athlete = Depends(get_current_athlete),
         .order_by(Activity.created_at.desc())
     ).all()
     return [a.to_summary() for a in rows]
+
+
+@router.get("/{activity_id}/track-line")
+def activity_track_line(activity_id: str, athlete: Athlete = Depends(get_current_athlete),
+                        db: Session = Depends(get_db)) -> dict:
+    """Упрощённая линия трека для подложки на карте редактора маршрута."""
+    activity = _owned_activity(activity_id, athlete, db)
+    if not activity.track:
+        raise HTTPException(status_code=404, detail="Трек пуст")
+    return {
+        "id": activity.id,
+        "name": activity.name,
+        "line": sample_track_line(activity.track),
+    }
 
 
 @router.get("/{activity_id}")
