@@ -24,6 +24,12 @@ class Settings(BaseSettings):
     # Доп. способ доступа к админ-API: заголовок X-Admin-Token (для скриптов).
     admin_token: str = "change-me-admin-token"
 
+    # Ключ для интеграции с ботом NeZhri: он сам грузит Strava-отчёты сюда от
+    # имени пользователя (привязка по Telegram id). Передаётся в X-API-Key.
+    # MONETIZATION NOTE: ingest can be metered per telegram_user_id here if
+    # SwimBuoy wants to cap free vs. paid sync volume.
+    nezhri_api_key: str = "change-me-nezhri-key"
+
     # CORS: список origin'ов через запятую, или "*".
     cors_origins: str = "*"
 

@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from .config import get_settings
 from .db import get_db, init_db
 from .models import Activity, Route
-from .routers import activities, admin, athletes, public, routes, watch
+from .routers import activities, admin, athletes, integrations, public, routes, watch
 
 settings = get_settings()
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -88,6 +88,7 @@ app.include_router(admin.router)
 app.include_router(routes.router)
 app.include_router(activities.router)
 app.include_router(watch.router)
+app.include_router(integrations.router)
 app.include_router(public.router)
 
 
