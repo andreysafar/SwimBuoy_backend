@@ -201,6 +201,21 @@ th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: upp
 .pin-start .map-pin-dot { background: #38bdf8; border-radius: 4px; width: 22px; height: 22px; }
 .pin-finish .map-pin-dot { background: #34d399; }
 
+/* Leaflet: locate + layer control */
+.leaflet-bar .map-locate-btn {
+  width: 34px; height: 34px; line-height: 32px;
+  background: #172339; color: #e6edf7;
+  border: none; cursor: pointer; font-size: 17px;
+  text-align: center;
+}
+.leaflet-bar .map-locate-btn:hover { background: #1e2d47; }
+.leaflet-control-layers {
+  background: #172339 !important; color: #e6edf7 !important;
+  border: 1px solid #25324d !important; border-radius: 8px !important;
+}
+.leaflet-control-layers label { color: #e6edf7; }
+.leaflet-control-layers-separator { border-top-color: #25324d !important; }
+
 /* ---- Адаптив ---- */
 @media (max-width: 600px) {
   main { padding: 16px 10px 60px; }

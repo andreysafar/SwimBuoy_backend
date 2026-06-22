@@ -98,6 +98,106 @@ function routeToLegData(route) {
   };
 }
 
+// ---------- Карты: подложки (OSM / Яндекс) и геолокация ----------
+let mapConfigCache = null;
+const BASEMAP_KEY = "swimbuoy_basemap";
+
+if (L.Control && L.Control.Attribution) {
+  L.Control.Attribution.prototype.options.prefix = false;
+}
+
+async function getMapConfig() {
+  if (!mapConfigCache) {
+    try {
+      mapConfigCache = await fetch("/api/map-config").then((r) => r.json());
+    } catch (e) {
+      mapConfigCache = { yandexApiKey: "" };
+    }
+  }
+  return mapConfigCache;
+}
+
+function createOsmLayer() {
+  return L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: "© OpenStreetMap",
+  });
+}
+
+function createYandexLayer(apiKey, kind) {
+  const layer = kind === "sat" ? "sat" : "map";
+  const url = apiKey
+    ? `https://tiles.api-maps.yandex.ru/v1/tiles/?apikey=${encodeURIComponent(apiKey)}&x={x}&y={y}&z={z}&lang=ru_RU&l=${layer}`
+    : `https://core-renderer-tiles.maps.yandex.net/tiles?l=${layer}&x={x}&y={y}&z={z}&scale=1&lang=ru_RU`;
+  return L.tileLayer(url, { maxZoom: 19, attribution: "© Яндекс" });
+}
+
+async function attachMapBasemaps(map, initialLayer) {
+  const cfg = await getMapConfig();
+  const basemaps = {
+    "OpenStreetMap": createOsmLayer(),
+    "Яндекс": createYandexLayer(cfg.yandexApiKey, "map"),
+    "Яндекс спутник": createYandexLayer(cfg.yandexApiKey, "sat"),
+  };
+  if (initialLayer) map.removeLayer(initialLayer);
+  const saved = localStorage.getItem(BASEMAP_KEY);
+  const pick = saved && basemaps[saved] ? saved : "OpenStreetMap";
+  basemaps[pick].addTo(map);
+  map.on("baselayerchange", (e) => localStorage.setItem(BASEMAP_KEY, e.name));
+  L.control.layers(basemaps, null, { collapsed: true }).addTo(map);
+}
+
+function startMapBasemaps(map, placeholder) {
+  attachMapBasemaps(map, placeholder);
+}
+
+function addLocateControl(map) {
+  const ctrl = L.control({ position: "topleft" });
+  ctrl.onAdd = function () {
+    const wrap = L.DomUtil.create("div", "leaflet-bar");
+    const btn = L.DomUtil.create("button", "map-locate-btn", wrap);
+    btn.type = "button";
+    btn.title = "Где я";
+    btn.innerHTML = "◎";
+    L.DomEvent.disableClickPropagation(btn);
+    L.DomEvent.on(btn, "click", (e) => {
+      L.DomEvent.stopPropagation(e);
+      locateOnMap(map);
+    });
+    return wrap;
+  };
+  ctrl.addTo(map);
+}
+
+function locateOnMap(map) {
+  if (!navigator.geolocation) {
+    toast("Геопозиция не поддерживается браузером");
+    return;
+  }
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      const lat = pos.coords.latitude;
+      const lon = pos.coords.longitude;
+      if (map._locateMarker) map.removeLayer(map._locateMarker);
+      map._locateMarker = L.circleMarker([lat, lon], {
+        radius: 9, color: "#38bdf8", weight: 3,
+        fillColor: "#38bdf8", fillOpacity: 0.85,
+      }).addTo(map).bindTooltip("Вы здесь");
+      map.setView([lat, lon], Math.max(map.getZoom(), 15));
+    },
+    () => toast("Не удалось определить геопозицию — разрешите доступ в браузере"),
+    { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 },
+  );
+}
+
+function initMapTiles(map) {
+  map.attributionControl?.setPrefix(false);
+  const placeholder = createOsmLayer();
+  placeholder.addTo(map);
+  startMapBasemaps(map, placeholder);
+  addLocateControl(map);
+}
+
 // ---------- Роутер ----------
 function navView() {
   if (getToken()) {
@@ -279,8 +379,7 @@ function renderRouteMap(elId, route) {
   const order = (route.session && route.session.order) || Object.keys(route.points || {});
   const legs = buildRouteLegs(routeToLegData(route));
   const map = L.map(elId);
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-    { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(map);
+  initMapTiles(map);
   const pts = [];
   if (route.start) {
     L.marker([route.start.lat, route.start.lon]).addTo(map).bindPopup("Старт");
@@ -592,8 +691,7 @@ async function viewGroup(token) {
       <tbody id="gtbl"></tbody></table></div>`;
 
   const map = L.map("gmap");
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-    { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(map);
+  initMapTiles(map);
   const bounds = [];
 
   // Плечи + буи маршрута.
@@ -854,8 +952,7 @@ async function viewRouteEdit(id, opts = {}) {
       <a class="btn ghost" href="${backHash}">Отмена</a></div>`;
 
   const map = L.map("map").setView(SPB_CENTER, 11);
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-    { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(map);
+  initMapTiles(map);
   const featureLayer = L.layerGroup().addTo(map);
   const trackLayer = L.layerGroup().addTo(map);
   const corridorLayer = L.layerGroup().addTo(map);
@@ -1298,8 +1395,7 @@ async function viewUpload() {
 // ---------- Отчёт по тренировке ----------
 function renderReportMap(elId, geojson) {
   const map = L.map(elId);
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-    { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(map);
+  initMapTiles(map);
   const bounds = [];
   const ll = (c) => [c[1], c[0]]; // geojson [lon,lat] -> leaflet [lat,lon]
   (geojson.features || []).forEach((f) => {

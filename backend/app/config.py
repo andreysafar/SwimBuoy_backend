@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     # Авто-импорт демо-тренировки из backend/Архив.zip при первом запуске.
     demo_bootstrap: bool = True
 
+    # API-ключ Яндекс.Карт для тайлов (https://developer.tech.yandex.ru/).
+    yandex_maps_api_key: str = ""
+
     @property
     def db_path(self) -> Path:
         return self.data_dir / "swimbuoy.sqlite3"

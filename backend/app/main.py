@@ -83,6 +83,12 @@ def geo_hint(request: Request) -> dict:
     }
 
 
+@app.get("/api/map-config")
+def map_config() -> dict:
+    """Публичные настройки карт (API-ключ Яндекса для тайлов)."""
+    return {"yandexApiKey": settings.yandex_maps_api_key}
+
+
 app.include_router(athletes.router)
 app.include_router(admin.router)
 app.include_router(routes.router)
