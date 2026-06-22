@@ -1,0 +1,17 @@
+<settings xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://developer.garmin.com/downloads/connect-iq/resources.xsd">
+    <setting propertyKey="@Properties.backendUrl" title="@Strings.SetBackendUrl">
+        <settingConfig type="alphaNumeric" />
+    </setting>
+    <setting propertyKey="@Properties.athleteToken" title="@Strings.SetAthleteToken">
+        <settingConfig type="alphaNumeric" />
+    </setting>
+    <setting propertyKey="@Properties.syncRouteId" title="@Strings.SetRouteId">
+        <settingConfig type="alphaNumeric" />
+    </setting>
+    <setting propertyKey="@Properties.autoUpload" title="@Strings.SetAutoUpload">
+        <settingConfig type="boolean" />
+    </setting>
+    <setting propertyKey="@Properties.trackSampleSec" title="@Strings.SetSampleSec">
+        <settingConfig type="numeric" min="1" max="30" />
+    </setting>
+</settings>

@@ -1,0 +1,17 @@
+services:
+  swimbuoy:
+    build: .
+    container_name: swimbuoy-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      SWIMBUOY_BASE_URL: "https://swimbuy.iron-siber.ru"
+      SWIMBUOY_ADMIN_TOKEN: "${SWIMBUOY_ADMIN_TOKEN:-change-me-admin-token}"
+      SWIMBUOY_CORS_ORIGINS: "*"
+      SWIMBUOY_DATA_DIR: "/data"
+    volumes:
+      - swimbuoy-data:/data
+
+volumes:
+  swimbuoy-data:

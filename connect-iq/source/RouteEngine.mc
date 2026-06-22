@@ -53,7 +53,20 @@ class RouteEngine {
 
     function initialize() {
         loadStartMismatchThreshold();
-        loadFromResource();
+        loadRoute();
+    }
+
+    // Маршрут берём из Storage (скачан с портала), иначе из вшитого ресурса.
+    function loadRoute() as Void {
+        var stored = Application.Storage.getValue("activeRoute");
+        if (stored != null && stored instanceof Dictionary) {
+            applyRouteDict(stored as Dictionary);
+            return;
+        }
+        var route = WatchUi.loadResource(Rez.JsonData.Route) as Dictionary;
+        if (route != null) {
+            applyRouteDict(route);
+        }
     }
 
     function loadStartMismatchThreshold() as Void {
@@ -67,8 +80,7 @@ class RouteEngine {
         }
     }
 
-    function loadFromResource() as Void {
-        var route = WatchUi.loadResource(Rez.JsonData.Route) as Dictionary;
+    function applyRouteDict(route as Dictionary) as Void {
         if (route == null) {
             return;
         }

@@ -10,4 +10,21 @@
     <string id="AllDone">Done!</string>
     <string id="Meters">m</string>
     <string id="SkipConfirm">Пропустить буй?</string>
+    <string id="SetBackendUrl">Portal URL</string>
+    <string id="SetAthleteToken">Athlete token</string>
+    <string id="SetRouteId">Route ID to sync</string>
+    <string id="SetAutoUpload">Auto-upload track</string>
+    <string id="SetSampleSec">Track sample, sec</string>
+    <string id="RouteSynced">Маршрут обновлён</string>
+    <string id="RouteSyncFail">Синк маршрута: ошибка</string>
+    <string id="Uploading">Отправка трека…</string>
+    <string id="UploadOk">Трек отправлен</string>
+    <string id="UploadFail">Отправка: ошибка</string>
+    <string id="NoConnection">Нет связи с телефоном</string>
+    <string id="NoTrack">Нет точек трека</string>
+    <string id="MenuTitle">SwimBuoy</string>
+    <string id="MenuSkip">Пропустить буй</string>
+    <string id="MenuSend">Отправить трек</string>
+    <string id="MenuConnected">связь есть</string>
+    <string id="MenuNoConn">нет связи</string>
 </strings>

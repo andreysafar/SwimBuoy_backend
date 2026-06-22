@@ -4,6 +4,16 @@
   "guidanceMode": "point_proximity",
   "arrivalRadiusM": 20,
   "dwellSec": 4,
+  "start": {
+    "lat": 60.208177,
+    "lon": 29.787466,
+    "name": "Старт"
+  },
+  "finish": {
+    "lat": 60.208177,
+    "lon": 29.787466,
+    "name": "Финиш"
+  },
   "points": {
     "P1": {
       "lat": 60.211561,

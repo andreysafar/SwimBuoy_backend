@@ -1,17 +1,22 @@
 import Toybox.Activity;
 import Toybox.ActivityRecording;
+import Toybox.Application;
 import Toybox.Attention;
 import Toybox.Graphics;
 import Toybox.Lang;
 import Toybox.Position;
+import Toybox.System;
 import Toybox.Time;
 import Toybox.Timer;
 import Toybox.WatchUi;
 using Toybox.Math;
 
 class SwimBuoyView extends WatchUi.View {
+    const MAX_TRACK_POINTS = 2000;
+
     var routeEngine as RouteEngine;
     var hapticNavigator as HapticNavigator;
+    var backendClient as BackendClient;
     var lastPosition as Position.Location?;
     var lastHeading as Float?;
     var lastActivePointId as String?;
@@ -23,10 +28,16 @@ class SwimBuoyView extends WatchUi.View {
     var gpsStarted as Boolean = false;
     var recordingSession as ActivityRecording.Session?;
 
+    var trackBuffer as Array = [];
+    var lastSampleSec as Number = 0;
+    var didSyncOnShow as Boolean = false;
+    var uploadStatus as String?;
+
     function initialize() {
         View.initialize();
         routeEngine = new RouteEngine();
         hapticNavigator = new HapticNavigator();
+        backendClient = new BackendClient(self);
         startGps();
     }
 
@@ -41,7 +52,96 @@ class SwimBuoyView extends WatchUi.View {
             pollTimer = new Timer.Timer();
             pollTimer.start(method(:onPollPosition), 1000, true);
         }
+        if (!didSyncOnShow) {
+            didSyncOnShow = true;
+            // Досылаем трек прошлого заплыва (если не доехал) и тянем маршрут.
+            backendClient.uploadPending();
+            backendClient.syncRouteIfConfigured();
+        }
         applyPositionInfo(Position.getInfo());
+        WatchUi.requestUpdate();
+    }
+
+    // Перезагрузка маршрута после синка с портала.
+    function reloadRoute() as Void {
+        routeEngine.loadRoute();
+        lastActivePointId = null;
+        uploadStatus = WatchUi.loadResource(Rez.Strings.RouteSynced) as String;
+        WatchUi.requestUpdate();
+    }
+
+    function getSampleSec() as Number {
+        var v = Application.Properties.getValue("trackSampleSec");
+        if (v != null && v instanceof Number && (v as Number) > 0) {
+            return v as Number;
+        }
+        return 3;
+    }
+
+    // Буферизуем GPS-точки заплыва для отправки на портал.
+    function sampleTrack(nowSec as Number, lat as Float, lon as Float) as Void {
+        if (trackBuffer.size() >= MAX_TRACK_POINTS) {
+            return;
+        }
+        if (lastSampleSec == 0 || nowSec - lastSampleSec >= getSampleSec()) {
+            trackBuffer.add({ "t" => nowSec, "lat" => lat, "lon" => lon });
+            lastSampleSec = nowSec;
+        }
+    }
+
+    function buildPayload() as Dictionary? {
+        if (trackBuffer.size() == 0) {
+            return null;
+        }
+        var first = trackBuffer[0] as Dictionary;
+        return {
+            "route_id" => routeEngine.routeId,
+            "name" => "SwimBuoy",
+            "recorded_at" => first.get("t"),
+            "points" => trackBuffer
+        };
+    }
+
+    function isPhoneConnected() as Boolean {
+        return System.getDeviceSettings().phoneConnected;
+    }
+
+    // Авто-отправка трека по завершении заплыва (если включена в настройках).
+    function uploadTrackIfNeeded() as Void {
+        var auto = Application.Properties.getValue("autoUpload");
+        if (auto != null && auto == false) {
+            return;
+        }
+        var payload = buildPayload();
+        if (payload == null) {
+            return;
+        }
+        uploadStatus = WatchUi.loadResource(Rez.Strings.Uploading) as String;
+        backendClient.queueAndUpload(payload);
+    }
+
+    // Ручная отправка трека (пункт меню «Отправить трек»).
+    function manualUpload() as Void {
+        if (!isPhoneConnected()) {
+            uploadStatus = WatchUi.loadResource(Rez.Strings.NoConnection) as String;
+            WatchUi.requestUpdate();
+            return;
+        }
+        var payload = buildPayload();
+        if (payload == null) {
+            uploadStatus = WatchUi.loadResource(Rez.Strings.NoTrack) as String;
+            WatchUi.requestUpdate();
+            return;
+        }
+        uploadStatus = WatchUi.loadResource(Rez.Strings.Uploading) as String;
+        backendClient.queueAndUpload(payload);
+        WatchUi.requestUpdate();
+    }
+
+    function onUploadResult(ok as Boolean) as Void {
+        uploadStatus = WatchUi.loadResource(
+            ok ? Rez.Strings.UploadOk : Rez.Strings.UploadFail
+        ) as String;
         WatchUi.requestUpdate();
     }
 
@@ -85,6 +185,11 @@ class SwimBuoyView extends WatchUi.View {
         } catch (ex) {
         }
         recordingSession = null;
+
+        if (save) {
+            // Отправляем трек заплыва на портал SwimBuoy.
+            uploadTrackIfNeeded();
+        }
     }
 
     function startGps() as Void {
@@ -155,6 +260,7 @@ class SwimBuoyView extends WatchUi.View {
         var lon = degrees[1].toFloat();
         var nowSec = Time.now().value();
 
+        sampleTrack(nowSec, lat, lon);
         routeEngine.updateProximity(lat, lon, nowSec);
         updateHaptic(lat, lon, nowSec);
         WatchUi.requestUpdate();
@@ -288,6 +394,10 @@ class SwimBuoyView extends WatchUi.View {
         var pointName = routeEngine.getActivePointName();
         if (pointName != null) {
             drawCenteredText(dc, 36, pointName, Graphics.FONT_TINY);
+        }
+
+        if (uploadStatus != null) {
+            drawCenteredText(dc, 56, uploadStatus, Graphics.FONT_XTINY);
         }
 
         var relativeBearing = GeoUtils.relativeBearingDegrees(bearing, lastHeading);

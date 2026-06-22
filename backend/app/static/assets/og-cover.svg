@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <radialGradient id="bg" cx="80%" cy="0%" r="70%">
+      <stop offset="0%" stop-color="#16243f"/>
+      <stop offset="60%" stop-color="#0e1726"/>
+    </radialGradient>
+    <linearGradient id="textGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#2dd4bf"/>
+      <stop offset="100%" stop-color="#38bdf8"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <!-- Grid lines -->
+  <line x1="0" y1="420" x2="1200" y2="420" stroke="#25324d" stroke-width="1"/>
+  <line x1="0" y1="210" x2="1200" y2="210" stroke="#25324d" stroke-width="1"/>
+  <!-- Corridor band -->
+  <path d="M100 350 Q400 310 600 340 Q800 370 1100 330" stroke="none" fill="#2dd4bf" fill-opacity="0.08"/>
+  <!-- Route line -->
+  <polyline points="140,390 380,320 600,355 820,290 1060,340"
+    stroke="#2dd4bf" stroke-width="2.5" stroke-dasharray="10 7" fill="none" opacity="0.55"/>
+  <!-- Track -->
+  <polyline points="140,395 360,330 580,362 810,298 1060,348"
+    stroke="#38bdf8" stroke-width="3.5" fill="none" opacity="0.85"/>
+  <!-- Buoys -->
+  <circle cx="380" cy="320" r="12" fill="#fbbf24" opacity="0.95"/>
+  <circle cx="600" cy="355" r="12" fill="#fbbf24" opacity="0.95"/>
+  <circle cx="820" cy="290" r="12" fill="#fbbf24" opacity="0.95"/>
+  <!-- Brand -->
+  <text x="600" y="175" font-family="-apple-system,Segoe UI,Roboto,sans-serif"
+    font-size="88" font-weight="700" fill="url(#textGrad)" text-anchor="middle">SwimBuoy</text>
+  <!-- Tagline -->
+  <text x="600" y="242" font-family="-apple-system,Segoe UI,Roboto,sans-serif"
+    font-size="30" fill="#8da2c0" text-anchor="middle">Плавание на открытой воде с виртуальными буями</text>
+  <!-- Bottom bar -->
+  <rect x="0" y="570" width="1200" height="60" fill="#15203450"/>
+  <text x="600" y="605" font-family="-apple-system,Segoe UI,Roboto,sans-serif"
+    font-size="22" fill="#4a6080" text-anchor="middle">swimbuy.iron-siber.ru</text>
+</svg>

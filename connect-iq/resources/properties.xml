@@ -10,4 +10,11 @@
     <property id="hapticStartMismatchM" type="number">50</property>
     <property id="hapticStartProgressM" type="number">5</property>
     <property id="hapticStartDriftM" type="number">5</property>
+
+    <!-- Портал SwimBuoy: синк маршрута и отправка трека заплыва. -->
+    <property id="backendUrl" type="string">https://swimbuy.iron-siber.ru</property>
+    <property id="athleteToken" type="string"></property>
+    <property id="syncRouteId" type="string"></property>
+    <property id="autoUpload" type="boolean">true</property>
+    <property id="trackSampleSec" type="number">3</property>
 </properties>
