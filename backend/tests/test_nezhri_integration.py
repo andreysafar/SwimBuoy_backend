@@ -81,6 +81,33 @@ def test_ingest_summary_only_and_dedup(client):
     assert len(lst.json()["activities"]) == 1
 
 
+def test_ingest_with_track_builds_route_less_report(client):
+    """A Strava import with a GPS track gets a renderable track-only report
+    (ok=True, track geojson, empty legs) — no "привяжите трек к маршруту"."""
+    body = {
+        "telegram_user_id": "9",
+        "name": "Заплыв",
+        "sport": "swim",
+        "external_id": "strava:track1",
+        "track": [
+            {"t": 0, "lat": 59.9, "lon": 30.3},
+            {"t": 60, "lat": 59.901, "lon": 30.301},
+            {"t": 120, "lat": 59.902, "lon": 30.302},
+        ],
+    }
+    act = client.post("/api/integrations/nezhri/activity",
+                      json={**body, "is_public": True}, headers=_h()).json()
+    assert act["distance_m"] and act["distance_m"] > 0
+
+    # Public report must be renderable: ok=True, a track geojson feature, no legs.
+    pub = client.get(f"/api/public/activities/{act['share_token']}").json()
+    report = pub["report"]
+    assert report["ok"] is True
+    assert report["legs"] == []
+    kinds = [f["properties"]["kind"] for f in report["geojson"]["features"]]
+    assert "track" in kinds
+
+
 def test_visibility_toggle(client):
     body = {"telegram_user_id": "8", "name": "Заплыв", "sport": "swim",
             "external_id": "strava:1", "distance_m": 1000, "duration_s": 1200}
