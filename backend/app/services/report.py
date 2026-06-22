@@ -304,3 +304,66 @@ def _build_geojson(
         })
 
     return {"type": "FeatureCollection", "features": features}
+
+
+def build_track_only_report(
+    points: list[TrackPoint],
+    *,
+    sport: str = "swim",
+    distance_m: float | None = None,
+    duration_s: float | None = None,
+) -> dict:
+    """Минимальный отчёт для тренировки без маршрута (Strava-импорт).
+
+    Без коридора буёв: показываем сам трек на карте + дистанцию/время. Так
+    импортированные из Strava заплывы/пробежки не упираются в «привяжите трек к
+    маршруту», а сразу отображаются. Структура совместима с reportBody на фронте
+    (ok / summary / legs / geojson).
+    """
+    coords = [(la, lo) for (_t, la, lo) in points if la is not None and lo is not None]
+
+    # Дистанция: из переданной сводки Strava, иначе считаем по треку.
+    dist = distance_m
+    if dist is None and len(coords) >= 2:
+        dist = 0.0
+        for (la1, lo1), (la2, lo2) in zip(coords, coords[1:]):
+            dist += haversine(la1, lo1, la2, lo2)
+
+    # Длительность: из переданной сводки, иначе из таймстампов трека.
+    dur = duration_s
+    ts = [t for (t, _la, _lo) in points if t is not None]
+    if dur is None and len(ts) >= 2:
+        dur = ts[-1] - ts[0]
+
+    pace = None
+    if sport == "swim" and dist and dur:
+        pace = round((dur / 60.0) / (dist / 100.0), 2)  # мин/100м
+
+    summary = {
+        "distance_m": round(dist, 1) if dist is not None else None,
+        "duration_s": int(dur) if dur else None,
+        "pace_min_100m": pace,
+        "points": len(coords),
+        "buoys_total": 0,
+        "buoys_taken": 0,
+        "efficiency_pct": None,
+        "xte_overall": None,
+        "sport": sport,
+        "no_route": True,
+    }
+
+    features = []
+    if coords:
+        features.append({
+            "type": "Feature",
+            "properties": {"kind": "track"},
+            "geometry": {"type": "LineString", "coordinates": [[lo, la] for (la, lo) in coords]},
+        })
+
+    return {
+        "ok": True,
+        "summary": summary,
+        "buoys": [],
+        "legs": [],
+        "geojson": {"type": "FeatureCollection", "features": features},
+    }

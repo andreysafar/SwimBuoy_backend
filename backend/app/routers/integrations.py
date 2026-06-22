@@ -18,6 +18,7 @@ from ..models import Activity, Athlete
 from ..schemas import SPORTS, NeZhriActivityIn, NeZhriLinkIn, NeZhriVisibilityIn
 from ..security import require_nezhri
 from ..services.activities import create_activity
+from ..services.report import build_track_only_report
 
 router = APIRouter(
     prefix="/api/integrations/nezhri",
@@ -106,17 +107,13 @@ def ingest_activity(body: NeZhriActivityIn, db: Session = Depends(get_db)) -> di
         if body.recorded_at else None
     )
 
-    # When there's no GPS track, persist the Strava summary so the activity still
-    # shows distance/duration on the portal.
-    report_override = None
-    if not points and (body.distance_m is not None or body.duration_s is not None):
-        report_override = {
-            "summary": {
-                "distance_m": body.distance_m,
-                "duration_s": body.duration_s,
-                "source": "strava_summary",
-            }
-        }
+    # No buoy route for Strava imports — build a minimal track-only report so the
+    # activity renders its GPS track + distance/duration on the portal instead of
+    # erroring with "привяжите трек к маршруту". When there's no track either, we
+    # still record the summary so distance/time show up.
+    report_override = build_track_only_report(
+        points, sport=sport, distance_m=body.distance_m, duration_s=body.duration_s,
+    )
 
     activity = create_activity(
         db, athlete, points,
