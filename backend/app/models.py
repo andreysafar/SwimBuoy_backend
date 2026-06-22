@@ -36,6 +36,10 @@ class Athlete(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     token: Mapped[str] = mapped_column(String, unique=True, index=True,
                                        default=gen_athlete_token)
+    # Link to a NeZhri Telegram user. Set when the athlete authorises NeZhri to
+    # push their Strava reports here. One Telegram id ↔ one SwimBuoy athlete.
+    telegram_user_id: Mapped[str | None] = mapped_column(String, unique=True,
+                                                         index=True, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
     routes: Mapped[list["Route"]] = relationship(back_populates="athlete",
@@ -111,7 +115,11 @@ class Activity(Base):
     route_id: Mapped[str | None] = mapped_column(ForeignKey("routes.id"), nullable=True, index=True)
 
     name: Mapped[str] = mapped_column(String, default="Тренировка")
-    source: Mapped[str] = mapped_column(String, default="manual")  # watch | manual_gpx | manual_fit | manual_tcx
+    source: Mapped[str] = mapped_column(String, default="manual")  # watch | manual_gpx | manual_fit | manual_tcx | strava
+    sport: Mapped[str] = mapped_column(String, default="swim")  # swim | run | ride
+    # Idempotency key for external imports, e.g. "strava:1234567890". Lets NeZhri
+    # re-push without creating duplicates.
+    external_id: Mapped[str | None] = mapped_column(String, index=True, nullable=True)
     recorded_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     track: Mapped[list] = mapped_column(JSON, default=list)   # [{t,lat,lon},...]
@@ -132,6 +140,8 @@ class Activity(Base):
             "id": self.id,
             "name": self.name,
             "source": self.source,
+            "sport": self.sport,
+            "external_id": self.external_id,
             "route_id": self.route_id,
             "recorded_at": self.recorded_at.isoformat() if self.recorded_at else None,
             "created_at": self.created_at.isoformat(),

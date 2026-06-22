@@ -19,13 +19,16 @@ def create_activity(
     route: Optional[Route],
     name: str,
     source: str,
+    sport: str = "swim",
+    external_id: Optional[str] = None,
     recorded_at: Optional[datetime] = None,
     original_filename: Optional[str] = None,
     stored_file: Optional[str] = None,
     is_public: bool = False,
+    report_override: Optional[dict] = None,
 ) -> Activity:
-    report = None
-    if route is not None:
+    report = report_override
+    if report is None and route is not None:
         report = build_report(route.to_buoy_route(), points)
 
     if recorded_at is None and points and points[0][0] is not None:
@@ -36,6 +39,8 @@ def create_activity(
         route_id=route.id if route else None,
         name=name,
         source=source,
+        sport=sport,
+        external_id=external_id,
         recorded_at=recorded_at,
         track=points_to_dicts(points),
         report=report,

@@ -57,6 +57,19 @@ def _check_basic(authorization: Optional[str]) -> bool:
             and secrets.compare_digest(password, settings.admin_password))
 
 
+def require_nezhri(
+    x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
+) -> None:
+    """Trusted server-to-server auth for the NeZhri bot's Strava-report ingest."""
+    settings = get_settings()
+    if x_api_key and secrets.compare_digest(x_api_key, settings.nezhri_api_key):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Нужен ключ интеграции NeZhri (X-API-Key)",
+    )
+
+
 def require_admin(
     authorization: Optional[str] = Header(default=None),
     x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
