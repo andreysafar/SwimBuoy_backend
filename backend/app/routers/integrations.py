@@ -18,6 +18,8 @@ from ..models import Activity, Athlete
 from ..schemas import SPORTS, NeZhriActivityIn, NeZhriLinkIn, NeZhriVisibilityIn
 from ..security import require_nezhri
 from ..services.activities import create_activity
+from ..services.timeutil import utc_naive_from_epoch
+from ..services.tracks import points_to_dicts
 
 router = APIRouter(
     prefix="/api/integrations/nezhri",
@@ -73,6 +75,18 @@ def ingest_activity(body: NeZhriActivityIn, db: Session = Depends(get_db)) -> di
         db, body.telegram_user_id, body.athlete_name or body.name
     )
 
+    points = [(p.t, p.lat, p.lon) for p in body.track]
+    recorded_at = utc_naive_from_epoch(body.recorded_at)
+    report_override = None
+    if not points and (body.distance_m is not None or body.duration_s is not None):
+        report_override = {
+            "summary": {
+                "distance_m": body.distance_m,
+                "duration_s": body.duration_s,
+                "source": "strava_summary",
+            }
+        }
+
     # Idempotency: if this external activity is already imported for this
     # athlete, return it instead of duplicating (NeZhri may re-push on edits).
     if body.external_id:
@@ -83,13 +97,25 @@ def ingest_activity(body: NeZhriActivityIn, db: Session = Depends(get_db)) -> di
             )
         )
         if existing:
-            # Allow visibility/sport to be updated on re-push.
+            # Allow visibility/sport/time/track to be updated on re-push.
             changed = False
             if existing.is_public != body.is_public:
                 existing.is_public = body.is_public
                 changed = True
             if existing.sport != sport:
                 existing.sport = sport
+                changed = True
+            new_recorded_at = utc_naive_from_epoch(body.recorded_at)
+            if new_recorded_at and existing.recorded_at != new_recorded_at:
+                existing.recorded_at = new_recorded_at
+                changed = True
+            if points:
+                new_track = points_to_dicts(points)
+                if new_track and existing.track != new_track:
+                    existing.track = new_track
+                    changed = True
+            if report_override:
+                existing.report = report_override
                 changed = True
             if changed:
                 db.commit()
@@ -99,24 +125,6 @@ def ingest_activity(body: NeZhriActivityIn, db: Session = Depends(get_db)) -> di
             out["share_url"] = f"{settings.base_url}/#/share/{existing.share_token}"
             out["duplicate"] = True
             return out
-
-    points = [(p.t, p.lat, p.lon) for p in body.track]
-    recorded_at = (
-        datetime.fromtimestamp(body.recorded_at, tz=timezone.utc)
-        if body.recorded_at else None
-    )
-
-    # When there's no GPS track, persist the Strava summary so the activity still
-    # shows distance/duration on the portal.
-    report_override = None
-    if not points and (body.distance_m is not None or body.duration_s is not None):
-        report_override = {
-            "summary": {
-                "distance_m": body.distance_m,
-                "duration_s": body.duration_s,
-                "source": "strava_summary",
-            }
-        }
 
     activity = create_activity(
         db, athlete, points,

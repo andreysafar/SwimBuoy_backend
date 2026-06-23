@@ -11,6 +11,7 @@ from sqlalchemy.types import JSON
 
 from .db import Base
 from .services.geo import route_chord_distance_m
+from .services.timeutil import api_datetime_iso
 
 # Токен спортсмена: ровно 8 символов A-Z a-z 0-9 (вводится на часах как пароль).
 TOKEN_LENGTH = 8
@@ -143,8 +144,8 @@ class Activity(Base):
             "sport": self.sport,
             "external_id": self.external_id,
             "route_id": self.route_id,
-            "recorded_at": self.recorded_at.isoformat() if self.recorded_at else None,
-            "created_at": self.created_at.isoformat(),
+            "recorded_at": api_datetime_iso(self.recorded_at),
+            "created_at": api_datetime_iso(self.created_at) or self.created_at.isoformat(),
             "is_public": self.is_public,
             "share_token": self.share_token,
             "distance_m": s.get("distance_m"),

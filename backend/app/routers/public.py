@@ -10,6 +10,7 @@ from ..db import get_db
 from ..models import Activity, RegistrationRequest, Route
 from ..schemas import RegistrationIn
 from ..services.groups import build_group_payload, group_public_activities
+from ..services.timeutil import api_datetime_iso
 from ..services.tracks import build_route_gpx
 
 router = APIRouter(prefix="/api/public", tags=["public"])
@@ -100,7 +101,7 @@ def public_groups(db: Session = Depends(get_db)) -> list[dict]:
         out.append({
             "group_id": g[0].share_token,
             "route_name": route.name if route else None,
-            "recorded_at": start.isoformat() if start else None,
+            "recorded_at": api_datetime_iso(start),
             "size": len(g),
             "swimmers": [a.athlete.name if a.athlete else a.name for a in g],
         })
@@ -133,7 +134,7 @@ def public_activity(share_token: str, db: Session = Depends(get_db)) -> dict:
         "name": activity.name,
         "athlete": activity.athlete.name,
         "route_name": route_name,
-        "recorded_at": activity.recorded_at.isoformat() if activity.recorded_at else None,
+        "recorded_at": api_datetime_iso(activity.recorded_at),
         "report": activity.report,
     }
 

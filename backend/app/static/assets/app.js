@@ -81,7 +81,16 @@ function fmtDur(s) {
 }
 function fmtDate(iso) {
   if (!iso) return "—";
-  return new Date(iso).toLocaleString("ru-RU", { dateStyle: "medium", timeStyle: "short" });
+  let s = String(iso).trim();
+  // API/DB timestamps are UTC; naive ISO must not be parsed as browser-local.
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s) && !/(Z|[+-]\d{2}:?\d{2})$/.test(s)) {
+    s += "Z";
+  }
+  return new Date(s).toLocaleString("ru-RU", {
+    timeZone: "Europe/Moscow",
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
 }
 function routeListMeta(r) {
   const parts = [`${r.points_count} буёв`];

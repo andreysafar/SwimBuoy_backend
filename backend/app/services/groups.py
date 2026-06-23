@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from ..models import Activity, Route
 from .geo import haversine
+from .timeutil import api_datetime_iso
 from .tracks import dicts_to_points
 
 AREA_RADIUS_M = 2000.0   # радиус близости областей
@@ -142,7 +143,7 @@ def build_group_payload(db: Session, members: list[Activity]) -> dict:
             "id": a.id,
             "share_token": a.share_token,
             "name": a.athlete.name if a.athlete else a.name,
-            "recorded_at": a.recorded_at.isoformat() if a.recorded_at else None,
+            "recorded_at": api_datetime_iso(a.recorded_at),
             "track": [[lat, lon] for (_, lat, lon) in pts],
             "summary": summary,
             "buoys": buoys,
@@ -152,6 +153,6 @@ def build_group_payload(db: Session, members: list[Activity]) -> dict:
     return {
         "group_id": members[0].share_token,
         "route": route_data,
-        "recorded_at": start.isoformat() if start else None,
+        "recorded_at": api_datetime_iso(start),
         "swimmers": swimmers,
     }
